@@ -345,12 +345,24 @@
     { issuer: 'OO에너지', grade: 'AAA', amount: 590, count: 12 },
   ];
 
-  // 임시 데이터(나중에 실제 시장 데이터로 교체)
-  const creditEvents = [
-    { issuer: 'OO건설', type: 'up', label: '등급전망 상향', detail: "'부정적' → '안정적'", agency: '한국신용평가', date: '2026-09-22' },
-    { issuer: 'OO캐피탈', type: 'down', label: '등급 하향', detail: "'AA-' → 'A+'", agency: 'NICE신용평가', date: '2026-09-19' },
-    { issuer: 'OO홀딩스', type: 'up', label: '등급 상향', detail: "'A+' → 'AA-'", agency: '한국기업평가', date: '2026-09-17' },
-  ];
+  // KOFIA '신용평가정보 > 신용등급 속보(변동사항만)'을 Supabase에 저장해둔 것을 읽어온다.
+  // 이 값은 KOFIA가 신용평가 3사로부터 받아 공개 게시하는 속보이며, 변동이 발생한 건의
+  // '현재' 등급/전망만 제공한다 (KOFIA 데이터에 '이전' 등급은 포함되어 있지 않음).
+  async function fetchCreditEvents() {
+    const url = `${SUPABASE_URL}/rest/v1/credit_events?select=company_nm,agency,rating,outlook,bond_series,estimate_day,report_url&order=estimate_day.desc&limit=10`;
+    const res = await fetch(url, {
+      headers: {
+        apikey: SUPABASE_ANON_KEY,
+        Authorization: `Bearer ${SUPABASE_ANON_KEY}`,
+      },
+    });
+
+    if (!res.ok) {
+      throw new Error(`Supabase 조회 실패: ${res.status}`);
+    }
+
+    return res.json();
+  }
 
   // 임시 데이터(나중에 실제 시장 데이터로 교체)
   const investmentOpinions = [
@@ -392,17 +404,27 @@
     });
   }
 
-  function renderCreditEvents() {
+  function renderCreditEvents(events) {
     const container = document.getElementById('credit-events');
-    creditEvents.forEach((ev) => {
+    container.innerHTML = '';
+
+    if (events.length === 0) {
+      container.innerHTML = '<div style="color:#6b778c;font-size:13px;">최근 30일간 등급/전망 변동 건이 없습니다.</div>';
+      return;
+    }
+
+    events.forEach((ev) => {
       const div = document.createElement('div');
       div.className = 'event-item';
-      const tagClass = ev.type === 'up' ? 'up' : 'down';
+      const ratingText = ev.rating ? `등급 ${ev.rating}` : '';
+      const outlookText = ev.outlook ? `전망 ${ev.outlook}` : '';
+      const detail = [ratingText, outlookText].filter(Boolean).join(' · ');
+      const reportLink = ev.report_url ? ` · <a href="${ev.report_url}" target="_blank" rel="noopener">평가보고서</a>` : '';
       div.innerHTML = `
-        <div class="issuer">${ev.issuer}</div>
-        <div class="meta">${ev.agency} · ${ev.date}</div>
-        <span class="tag ${tagClass}">${ev.label}</span>
-        <span>${ev.detail}</span>
+        <div class="issuer">${ev.company_nm}</div>
+        <div class="meta">${ev.agency} · ${ev.estimate_day}${reportLink}</div>
+        <span class="tag down">등급/전망 변동</span>
+        <span>${detail}</span>
       `;
       container.appendChild(div);
     });
@@ -501,7 +523,15 @@
     });
 
   renderTopTrades();
-  renderCreditEvents();
+
+  document.getElementById('credit-events').innerHTML = '<div style="color:#6b778c;font-size:13px;">크레딧 이벤트를 불러오는 중...</div>';
+  fetchCreditEvents()
+    .then((events) => renderCreditEvents(events))
+    .catch((err) => {
+      console.error(err);
+      document.getElementById('credit-events').innerHTML = '<div style="color:#d64545;font-size:13px;">크레딧 이벤트를 불러오지 못했습니다.</div>';
+    });
+
   renderInvestmentOpinions();
   buildSpreadChart('sector');
   renderVolumeChart();

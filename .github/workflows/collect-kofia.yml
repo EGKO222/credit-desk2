@@ -1,8 +1,9 @@
-name: Collect KOFIA rates
+name: Collect KOFIA data
 
 on:
+  # 매일 새벽 5시(KST) = 전날 20:00 UTC, 한국 영업일(월~금) 아침에만 실행
   schedule:
-    - cron: "30 7 * * 1-5"
+    - cron: "0 20 * * 0-4"
   workflow_dispatch:
 
 jobs:
@@ -15,8 +16,14 @@ jobs:
         with:
           node-version: "20"
 
-      - name: Run collector
+      - name: Run rate collector
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
         run: node scripts/collect-kofia.mjs
+
+      - name: Run credit events collector
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: node scripts/collect-credit-events.mjs
