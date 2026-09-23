@@ -1,0 +1,277 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>우리 팀 보드</title>
+<style>
+  * {
+    box-sizing: border-box;
+  }
+
+  body {
+    margin: 0;
+    font-family: "Apple SD Gothic Neo", "Malgun Gothic", sans-serif;
+    background-color: #f4f5f7;
+    color: #172b4d;
+  }
+
+  header {
+    padding: 24px 32px;
+    background-color: #ffffff;
+    border-bottom: 1px solid #dfe1e6;
+  }
+
+  header h1 {
+    margin: 0;
+    font-size: 24px;
+  }
+
+  .board {
+    display: flex;
+    gap: 16px;
+    padding: 24px 32px;
+    align-items: flex-start;
+  }
+
+  .column {
+    background-color: #ebecf0;
+    border-radius: 8px;
+    width: 280px;
+    flex-shrink: 0;
+    padding: 12px;
+    display: flex;
+    flex-direction: column;
+  }
+
+  .column-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 4px 8px 12px 8px;
+  }
+
+  .column-header h2 {
+    font-size: 14px;
+    margin: 0;
+  }
+
+  .card-count {
+    background-color: #dfe1e6;
+    color: #44546f;
+    font-size: 12px;
+    padding: 2px 8px;
+    border-radius: 10px;
+  }
+
+  .card-list {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    min-height: 20px;
+  }
+
+  .card {
+    background-color: #ffffff;
+    border-radius: 6px;
+    padding: 10px 12px;
+    box-shadow: 0 1px 2px rgba(9, 30, 66, 0.25);
+    font-size: 14px;
+  }
+
+  .add-card-btn {
+    margin-top: 12px;
+    background: none;
+    border: none;
+    text-align: left;
+    padding: 8px;
+    border-radius: 6px;
+    color: #44546f;
+    font-size: 14px;
+    cursor: pointer;
+  }
+
+  .add-card-btn:hover {
+    background-color: #dfe1e6;
+  }
+
+  .add-card-form {
+    margin-top: 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .add-card-input {
+    width: 100%;
+    border: none;
+    border-radius: 6px;
+    padding: 8px 10px;
+    font-size: 14px;
+    font-family: inherit;
+    resize: none;
+    box-shadow: 0 1px 2px rgba(9, 30, 66, 0.25);
+  }
+
+  .add-card-btn-row {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+  }
+
+  .confirm-btn {
+    background-color: #0052cc;
+    color: #ffffff;
+    border: none;
+    border-radius: 4px;
+    padding: 6px 12px;
+    font-size: 14px;
+    cursor: pointer;
+  }
+
+  .confirm-btn:hover {
+    background-color: #0747a6;
+  }
+
+  .cancel-btn {
+    background: none;
+    border: none;
+    color: #44546f;
+    font-size: 14px;
+    cursor: pointer;
+    padding: 6px 8px;
+    border-radius: 4px;
+  }
+
+  .cancel-btn:hover {
+    background-color: #dfe1e6;
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>우리 팀 보드</h1>
+</header>
+
+<main class="board">
+
+  <section class="column" id="column-todo">
+    <div class="column-header">
+      <h2>할 일</h2>
+      <span class="card-count">3</span>
+    </div>
+    <div class="card-list">
+      <!-- 임시 데이터(나중에 Supabase로 교체) -->
+      <div class="card">기획서 초안 작성</div>
+      <div class="card">디자인 시안 검토</div>
+      <div class="card">회의 일정 잡기</div>
+    </div>
+    <button class="add-card-btn">+ 카드 추가</button>
+  </section>
+
+  <section class="column" id="column-doing">
+    <div class="column-header">
+      <h2>진행 중</h2>
+      <span class="card-count">2</span>
+    </div>
+    <div class="card-list">
+      <!-- 임시 데이터(나중에 Supabase로 교체) -->
+      <div class="card">랜딩 페이지 개발</div>
+      <div class="card">API 연동 테스트</div>
+    </div>
+    <button class="add-card-btn">+ 카드 추가</button>
+  </section>
+
+  <section class="column" id="column-done">
+    <div class="column-header">
+      <h2>완료</h2>
+      <span class="card-count">2</span>
+    </div>
+    <div class="card-list">
+      <!-- 임시 데이터(나중에 Supabase로 교체) -->
+      <div class="card">프로젝트 킥오프 미팅</div>
+      <div class="card">요구사항 정리</div>
+    </div>
+    <button class="add-card-btn">+ 카드 추가</button>
+  </section>
+
+</main>
+
+<script>
+  document.querySelectorAll('.column').forEach((column) => {
+    const addBtn = column.querySelector('.add-card-btn');
+    const cardList = column.querySelector('.card-list');
+    const countEl = column.querySelector('.card-count');
+
+    addBtn.addEventListener('click', () => {
+      // 이미 입력창이 열려 있으면 다시 열지 않음
+      if (column.querySelector('.add-card-form')) return;
+
+      addBtn.style.display = 'none';
+
+      const form = document.createElement('div');
+      form.className = 'add-card-form';
+
+      const input = document.createElement('textarea');
+      input.className = 'add-card-input';
+      input.rows = 2;
+      input.placeholder = '할 일 제목을 입력하세요';
+
+      const btnRow = document.createElement('div');
+      btnRow.className = 'add-card-btn-row';
+
+      const confirmBtn = document.createElement('button');
+      confirmBtn.type = 'button';
+      confirmBtn.className = 'confirm-btn';
+      confirmBtn.textContent = '카드 추가';
+
+      const cancelBtn = document.createElement('button');
+      cancelBtn.type = 'button';
+      cancelBtn.className = 'cancel-btn';
+      cancelBtn.textContent = '취소';
+
+      function closeForm() {
+        form.remove();
+        addBtn.style.display = '';
+      }
+
+      function submitCard() {
+        const title = input.value.trim();
+        if (!title) {
+          input.focus();
+          return;
+        }
+        const card = document.createElement('div');
+        card.className = 'card';
+        card.textContent = title;
+        cardList.appendChild(card);
+        countEl.textContent = cardList.children.length;
+        input.value = '';
+        input.focus();
+      }
+
+      confirmBtn.addEventListener('click', submitCard);
+      cancelBtn.addEventListener('click', closeForm);
+      input.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter' && !e.shiftKey) {
+          e.preventDefault();
+          submitCard();
+        } else if (e.key === 'Escape') {
+          closeForm();
+        }
+      });
+
+      btnRow.appendChild(confirmBtn);
+      btnRow.appendChild(cancelBtn);
+      form.appendChild(input);
+      form.appendChild(btnRow);
+
+      addBtn.insertAdjacentElement('afterend', form);
+      input.focus();
+    });
+  });
+</script>
+
+</body>
+</html>
