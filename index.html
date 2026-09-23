@@ -3,7 +3,8 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>우리 팀 보드</title>
+<title>크레딧 채권 매매 대시보드</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
 <style>
   * {
     box-sizing: border-box;
@@ -17,260 +18,493 @@
   }
 
   header {
-    padding: 24px 32px;
-    background-color: #ffffff;
-    border-bottom: 1px solid #dfe1e6;
+    padding: 20px 32px;
+    background-color: #0b1f3a;
+    color: #ffffff;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 8px;
   }
 
   header h1 {
     margin: 0;
-    font-size: 24px;
+    font-size: 20px;
   }
 
-  .board {
-    display: flex;
-    gap: 16px;
+  header .as-of {
+    font-size: 13px;
+    color: #b7c3d9;
+  }
+
+  main {
     padding: 24px 32px;
-    align-items: flex-start;
-  }
-
-  .column {
-    background-color: #ebecf0;
-    border-radius: 8px;
-    width: 280px;
-    flex-shrink: 0;
-    padding: 12px;
     display: flex;
     flex-direction: column;
+    gap: 20px;
   }
 
-  .column-header {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    padding: 4px 8px 12px 8px;
-  }
-
-  .column-header h2 {
-    font-size: 14px;
-    margin: 0;
-  }
-
-  .card-count {
-    background-color: #dfe1e6;
-    color: #44546f;
-    font-size: 12px;
-    padding: 2px 8px;
+  .panel {
+    background-color: #ffffff;
+    border: 1px solid #dfe1e6;
     border-radius: 10px;
+    padding: 18px 20px;
   }
 
-  .card-list {
+  .panel h2 {
+    font-size: 15px;
+    margin: 0 0 14px 0;
+    color: #172b4d;
+  }
+
+  .rate-cards {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 12px;
+  }
+
+  .rate-card {
+    background-color: #f4f5f7;
+    border-radius: 8px;
+    padding: 14px 16px;
+  }
+
+  .rate-card .tenor {
+    font-size: 13px;
+    color: #44546f;
+  }
+
+  .rate-card .value {
+    font-size: 24px;
+    font-weight: 700;
+    margin-top: 4px;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .rate-card .change {
+    font-size: 13px;
+    margin-top: 4px;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .change.up { color: #d64545; }
+  .change.down { color: #2563eb; }
+  .change.flat { color: #6b778c; }
+
+  .grid-2 {
+    display: grid;
+    grid-template-columns: 1.4fr 1fr;
+    gap: 20px;
+    align-items: start;
+  }
+
+  .col {
     display: flex;
     flex-direction: column;
-    gap: 8px;
-    min-height: 20px;
+    gap: 20px;
   }
 
-  .card {
+  .tab-row {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 14px;
+  }
+
+  .tab-btn {
+    border: 1px solid #dfe1e6;
     background-color: #ffffff;
     border-radius: 6px;
-    padding: 10px 12px;
-    box-shadow: 0 1px 2px rgba(9, 30, 66, 0.25);
-    font-size: 14px;
-  }
-
-  .add-card-btn {
-    margin-top: 12px;
-    background: none;
-    border: none;
-    text-align: left;
-    padding: 8px;
-    border-radius: 6px;
-    color: #44546f;
-    font-size: 14px;
+    padding: 6px 14px;
+    font-size: 13px;
     cursor: pointer;
+    color: #44546f;
   }
 
-  .add-card-btn:hover {
-    background-color: #dfe1e6;
+  .tab-btn.active {
+    background-color: #0b1f3a;
+    border-color: #0b1f3a;
+    color: #ffffff;
   }
 
-  .add-card-form {
-    margin-top: 12px;
+  .chart-wrap {
+    position: relative;
+    height: 280px;
+  }
+
+  .chart-wrap.short {
+    height: 220px;
+  }
+
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 13px;
+  }
+
+  th, td {
+    text-align: left;
+    padding: 8px 6px;
+    border-bottom: 1px solid #ebecf0;
+  }
+
+  th {
+    color: #6b778c;
+    font-weight: 600;
+    font-size: 12px;
+  }
+
+  td.num {
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .event-list, .opinion-list {
     display: flex;
     flex-direction: column;
-    gap: 8px;
+    gap: 10px;
   }
 
-  .add-card-input {
-    width: 100%;
-    border: none;
-    border-radius: 6px;
-    padding: 8px 10px;
-    font-size: 14px;
-    font-family: inherit;
-    resize: none;
-    box-shadow: 0 1px 2px rgba(9, 30, 66, 0.25);
+  .event-item, .opinion-item {
+    padding: 10px 12px;
+    background-color: #f4f5f7;
+    border-radius: 8px;
+    font-size: 13px;
   }
 
-  .add-card-btn-row {
-    display: flex;
-    gap: 8px;
-    align-items: center;
+  .event-item .issuer, .opinion-item .title {
+    font-weight: 600;
+    margin-bottom: 4px;
   }
 
-  .confirm-btn {
-    background-color: #0052cc;
-    color: #ffffff;
-    border: none;
-    border-radius: 4px;
-    padding: 6px 12px;
-    font-size: 14px;
-    cursor: pointer;
+  .event-item .meta, .opinion-item .meta {
+    color: #6b778c;
+    font-size: 12px;
+    margin-bottom: 4px;
   }
 
-  .confirm-btn:hover {
-    background-color: #0747a6;
+  .tag {
+    display: inline-block;
+    font-size: 11px;
+    padding: 2px 8px;
+    border-radius: 10px;
+    margin-right: 6px;
   }
 
-  .cancel-btn {
-    background: none;
-    border: none;
-    color: #44546f;
-    font-size: 14px;
-    cursor: pointer;
-    padding: 6px 8px;
-    border-radius: 4px;
-  }
+  .tag.up { background-color: #ffebe6; color: #d64545; }
+  .tag.down { background-color: #e6f0ff; color: #2563eb; }
 
-  .cancel-btn:hover {
-    background-color: #dfe1e6;
+  @media (max-width: 960px) {
+    .grid-2 {
+      grid-template-columns: 1fr;
+    }
+    .rate-cards {
+      grid-template-columns: repeat(2, 1fr);
+    }
   }
 </style>
 </head>
 <body>
 
 <header>
-  <h1>우리 팀 보드</h1>
+  <h1>크레딧 채권 매매 대시보드</h1>
+  <span class="as-of">기준일: 2026-09-23 (장 마감) · 데이터: 임시 데이터, 추후 실제 시장 데이터로 교체 예정 · 참고: 금융투자협회 채권정보센터(KOFIA BIS)</span>
 </header>
 
-<main class="board">
+<main>
 
-  <section class="column" id="column-todo">
-    <div class="column-header">
-      <h2>할 일</h2>
-      <span class="card-count">3</span>
-    </div>
-    <div class="card-list">
-      <!-- 임시 데이터(나중에 Supabase로 교체) -->
-      <div class="card">기획서 초안 작성</div>
-      <div class="card">디자인 시안 검토</div>
-      <div class="card">회의 일정 잡기</div>
-    </div>
-    <button class="add-card-btn">+ 카드 추가</button>
+  <section class="panel">
+    <h2>국고채 최종호가수익률</h2>
+    <div class="rate-cards" id="rate-cards"></div>
   </section>
 
-  <section class="column" id="column-doing">
-    <div class="column-header">
-      <h2>진행 중</h2>
-      <span class="card-count">2</span>
-    </div>
-    <div class="card-list">
-      <!-- 임시 데이터(나중에 Supabase로 교체) -->
-      <div class="card">랜딩 페이지 개발</div>
-      <div class="card">API 연동 테스트</div>
-    </div>
-    <button class="add-card-btn">+ 카드 추가</button>
-  </section>
+  <div class="grid-2">
+    <div class="col">
+      <section class="panel">
+        <h2>스프레드 추이</h2>
+        <div class="tab-row" id="spread-tabs">
+          <button class="tab-btn active" data-mode="sector">섹터별</button>
+          <button class="tab-btn" data-mode="grade">등급별</button>
+          <button class="tab-btn" data-mode="period">투자기간별</button>
+        </div>
+        <div class="chart-wrap">
+          <canvas id="spread-chart"></canvas>
+        </div>
+      </section>
 
-  <section class="column" id="column-done">
-    <div class="column-header">
-      <h2>완료</h2>
-      <span class="card-count">2</span>
+      <section class="panel">
+        <h2>섹터별 유통 물량</h2>
+        <div class="chart-wrap short">
+          <canvas id="volume-chart"></canvas>
+        </div>
+      </section>
     </div>
-    <div class="card-list">
-      <!-- 임시 데이터(나중에 Supabase로 교체) -->
-      <div class="card">프로젝트 킥오프 미팅</div>
-      <div class="card">요구사항 정리</div>
+
+    <div class="col">
+      <section class="panel">
+        <h2>전일 크레딧 매매 Top 5 (발행자 기준)</h2>
+        <table>
+          <thead>
+            <tr>
+              <th>발행자</th>
+              <th>등급</th>
+              <th class="num">매매금액(억원)</th>
+              <th class="num">건수</th>
+            </tr>
+          </thead>
+          <tbody id="top-trades-body"></tbody>
+        </table>
+      </section>
+
+      <section class="panel">
+        <h2>크레딧 이벤트</h2>
+        <div class="event-list" id="credit-events"></div>
+      </section>
+
+      <section class="panel">
+        <h2>주요 투자의견</h2>
+        <div class="opinion-list" id="investment-opinions"></div>
+      </section>
     </div>
-    <button class="add-card-btn">+ 카드 추가</button>
-  </section>
+  </div>
 
 </main>
 
 <script>
-  document.querySelectorAll('.column').forEach((column) => {
-    const addBtn = column.querySelector('.add-card-btn');
-    const cardList = column.querySelector('.card-list');
-    const countEl = column.querySelector('.card-count');
+  // Supabase anon key는 Row Level Security(읽기 전용 정책)로 보호되므로 클라이언트 코드에 그대로 둡니다.
+  // 쓰기 권한이 있는 service_role 키는 절대 여기에 넣지 않습니다 (scripts/collect-kofia.mjs 쪽 .env에서만 사용).
+  const SUPABASE_URL = 'https://yhawlnfynxtbschjbzac.supabase.co';
+  const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InloYXdsbmZ5bnh0YnNjaGpiemFjIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTAxNDQyODAsImV4cCI6MjEwNTcyMDI4MH0.3aGHs4yxtCxtnsN0b4-wtNWS71bZQVJeJ_fv-te-JNI';
 
-    addBtn.addEventListener('click', () => {
-      // 이미 입력창이 열려 있으면 다시 열지 않음
-      if (column.querySelector('.add-card-form')) return;
+  const TENOR_ORDER = ['국고채 3년', '국고채 5년', '국고채 10년', '국고채 30년'];
 
-      addBtn.style.display = 'none';
-
-      const form = document.createElement('div');
-      form.className = 'add-card-form';
-
-      const input = document.createElement('textarea');
-      input.className = 'add-card-input';
-      input.rows = 2;
-      input.placeholder = '할 일 제목을 입력하세요';
-
-      const btnRow = document.createElement('div');
-      btnRow.className = 'add-card-btn-row';
-
-      const confirmBtn = document.createElement('button');
-      confirmBtn.type = 'button';
-      confirmBtn.className = 'confirm-btn';
-      confirmBtn.textContent = '카드 추가';
-
-      const cancelBtn = document.createElement('button');
-      cancelBtn.type = 'button';
-      cancelBtn.className = 'cancel-btn';
-      cancelBtn.textContent = '취소';
-
-      function closeForm() {
-        form.remove();
-        addBtn.style.display = '';
-      }
-
-      function submitCard() {
-        const title = input.value.trim();
-        if (!title) {
-          input.focus();
-          return;
-        }
-        const card = document.createElement('div');
-        card.className = 'card';
-        card.textContent = title;
-        cardList.appendChild(card);
-        countEl.textContent = cardList.children.length;
-        input.value = '';
-        input.focus();
-      }
-
-      confirmBtn.addEventListener('click', submitCard);
-      cancelBtn.addEventListener('click', closeForm);
-      input.addEventListener('keydown', (e) => {
-        if (e.key === 'Enter' && !e.shiftKey) {
-          e.preventDefault();
-          submitCard();
-        } else if (e.key === 'Escape') {
-          closeForm();
-        }
-      });
-
-      btnRow.appendChild(confirmBtn);
-      btnRow.appendChild(cancelBtn);
-      form.appendChild(input);
-      form.appendChild(btnRow);
-
-      addBtn.insertAdjacentElement('afterend', form);
-      input.focus();
+  async function fetchFinalQuoteRates() {
+    const url = `${SUPABASE_URL}/rest/v1/kofia_rates?select=tenor,rate,change_bp&order=tenor`;
+    const res = await fetch(url, {
+      headers: {
+        apikey: SUPABASE_ANON_KEY,
+        Authorization: `Bearer ${SUPABASE_ANON_KEY}`,
+      },
     });
+
+    if (!res.ok) {
+      throw new Error(`Supabase 조회 실패: ${res.status}`);
+    }
+
+    const rows = await res.json();
+    const byTenor = Object.fromEntries(rows.map((r) => [r.tenor, r]));
+
+    return TENOR_ORDER.filter((t) => byTenor[t]).map((t) => ({
+      tenor: t,
+      rate: Number(byTenor[t].rate),
+      changeBp: Number(byTenor[t].change_bp),
+    }));
+  }
+
+  // 임시 데이터(나중에 실제 시장 데이터로 교체)
+  const spreadDates = ['9/17', '9/18', '9/19', '9/20', '9/21', '9/22', '9/23'];
+
+  const spreadDatasets = {
+    sector: [
+      { name: '금융', color: '#2563eb', data: [48, 47, 46, 45, 44, 43, 42] },
+      { name: '카드', color: '#059669', data: [58, 59, 57, 56, 55, 54, 53] },
+      { name: '캐피탈', color: '#d97706', data: [82, 81, 83, 80, 79, 78, 77] },
+      { name: '공사공단', color: '#7c3aed', data: [18, 18, 17, 17, 16, 16, 15] },
+      { name: '일반', color: '#dc2626', data: [70, 72, 71, 73, 74, 73, 75] },
+    ],
+    grade: [
+      { name: 'AAA', color: '#2563eb', data: [28, 27, 27, 26, 26, 25, 25] },
+      { name: 'AA+', color: '#059669', data: [40, 41, 40, 39, 39, 38, 38] },
+      { name: 'AA', color: '#d97706', data: [52, 53, 52, 54, 53, 55, 54] },
+      { name: 'AA-', color: '#7c3aed', data: [68, 69, 70, 71, 70, 72, 73] },
+      { name: 'A+', color: '#dc2626', data: [105, 107, 108, 110, 112, 111, 113] },
+    ],
+    period: [
+      { name: '1년', color: '#2563eb', data: [38, 37, 37, 36, 36, 35, 35] },
+      { name: '3년', color: '#059669', data: [52, 53, 52, 53, 54, 53, 55] },
+      { name: '5년', color: '#d97706', data: [63, 64, 65, 64, 66, 65, 67] },
+      { name: '10년', color: '#dc2626', data: [78, 79, 80, 81, 80, 82, 83] },
+    ],
+  };
+
+  // 임시 데이터(나중에 실제 시장 데이터로 교체) - 단위: 조원
+  const sectorVolume = [
+    { sector: '금융', value: 12.3 },
+    { sector: '카드', value: 4.1 },
+    { sector: '캐피탈', value: 6.7 },
+    { sector: '공사공단', value: 9.8 },
+    { sector: '일반', value: 15.2 },
+  ];
+
+  // 임시 데이터(나중에 실제 시장 데이터로 교체)
+  const topTrades = [
+    { issuer: 'OO카드', grade: 'AA+', amount: 1280, count: 34 },
+    { issuer: 'OO캐피탈', grade: 'AA-', amount: 940, count: 27 },
+    { issuer: 'OO증권', grade: 'AA', amount: 810, count: 19 },
+    { issuer: 'OO건설', grade: 'A+', amount: 655, count: 22 },
+    { issuer: 'OO에너지', grade: 'AAA', amount: 590, count: 12 },
+  ];
+
+  // 임시 데이터(나중에 실제 시장 데이터로 교체)
+  const creditEvents = [
+    { issuer: 'OO건설', type: 'up', label: '등급전망 상향', detail: "'부정적' → '안정적'", agency: '한국신용평가', date: '2026-09-22' },
+    { issuer: 'OO캐피탈', type: 'down', label: '등급 하향', detail: "'AA-' → 'A+'", agency: 'NICE신용평가', date: '2026-09-19' },
+    { issuer: 'OO홀딩스', type: 'up', label: '등급 상향', detail: "'A+' → 'AA-'", agency: '한국기업평가', date: '2026-09-17' },
+  ];
+
+  // 임시 데이터(나중에 실제 시장 데이터로 교체)
+  const investmentOpinions = [
+    { title: 'AA- 등급 회사채 비중확대 의견', house: 'OO증권 리서치', date: '2026-09-23', summary: '금리 인하 기대와 함께 크레딧 스프레드 추가 축소 여력이 있다고 판단.' },
+    { title: '은행채 대비 카드채 스프레드 확대 전망', house: 'XX증권 리서치', date: '2026-09-22', summary: '카드사 조달 부담 증가로 단기 스프레드 확대 가능성 제시.' },
+    { title: '공사채 저가매수 접근 유효', house: 'YY자산운용', date: '2026-09-20', summary: '국고채 대비 스프레드가 과거 평균 대비 높은 구간이라는 판단.' },
+  ];
+
+  function renderRateCards(rates) {
+    const container = document.getElementById('rate-cards');
+    container.innerHTML = '';
+    rates.forEach((item) => {
+      const card = document.createElement('div');
+      card.className = 'rate-card';
+
+      const dir = item.changeBp > 0 ? 'up' : item.changeBp < 0 ? 'down' : 'flat';
+      const sign = item.changeBp > 0 ? '+' : '';
+
+      card.innerHTML = `
+        <div class="tenor">${item.tenor}</div>
+        <div class="value">${item.rate.toFixed(2)}%</div>
+        <div class="change ${dir}">${sign}${item.changeBp.toFixed(1)}bp</div>
+      `;
+      container.appendChild(card);
+    });
+  }
+
+  function renderTopTrades() {
+    const body = document.getElementById('top-trades-body');
+    topTrades.forEach((row) => {
+      const tr = document.createElement('tr');
+      tr.innerHTML = `
+        <td>${row.issuer}</td>
+        <td>${row.grade}</td>
+        <td class="num">${row.amount.toLocaleString('ko-KR')}</td>
+        <td class="num">${row.count}</td>
+      `;
+      body.appendChild(tr);
+    });
+  }
+
+  function renderCreditEvents() {
+    const container = document.getElementById('credit-events');
+    creditEvents.forEach((ev) => {
+      const div = document.createElement('div');
+      div.className = 'event-item';
+      const tagClass = ev.type === 'up' ? 'up' : 'down';
+      div.innerHTML = `
+        <div class="issuer">${ev.issuer}</div>
+        <div class="meta">${ev.agency} · ${ev.date}</div>
+        <span class="tag ${tagClass}">${ev.label}</span>
+        <span>${ev.detail}</span>
+      `;
+      container.appendChild(div);
+    });
+  }
+
+  function renderInvestmentOpinions() {
+    const container = document.getElementById('investment-opinions');
+    investmentOpinions.forEach((op) => {
+      const div = document.createElement('div');
+      div.className = 'opinion-item';
+      div.innerHTML = `
+        <div class="title">${op.title}</div>
+        <div class="meta">${op.house} · ${op.date}</div>
+        <div>${op.summary}</div>
+      `;
+      container.appendChild(div);
+    });
+  }
+
+  let spreadChart;
+
+  function buildSpreadChart(mode) {
+    const ctx = document.getElementById('spread-chart');
+    const series = spreadDatasets[mode];
+
+    const datasets = series.map((s) => ({
+      label: s.name,
+      data: s.data,
+      borderColor: s.color,
+      backgroundColor: s.color,
+      tension: 0.3,
+      pointRadius: 2,
+    }));
+
+    if (spreadChart) {
+      spreadChart.data.labels = spreadDates;
+      spreadChart.data.datasets = datasets;
+      spreadChart.update();
+      return;
+    }
+
+    spreadChart = new Chart(ctx, {
+      type: 'line',
+      data: { labels: spreadDates, datasets },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        interaction: { mode: 'index', intersect: false },
+        scales: {
+          y: {
+            title: { display: true, text: 'bp' },
+          },
+        },
+      },
+    });
+  }
+
+  function renderVolumeChart() {
+    const ctx = document.getElementById('volume-chart');
+    new Chart(ctx, {
+      type: 'bar',
+      data: {
+        labels: sectorVolume.map((s) => s.sector),
+        datasets: [{
+          label: '유통 물량(조원)',
+          data: sectorVolume.map((s) => s.value),
+          backgroundColor: '#2563eb',
+          borderRadius: 4,
+        }],
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: { legend: { display: false } },
+        scales: {
+          y: { title: { display: true, text: '조원' } },
+        },
+      },
+    });
+  }
+
+  document.getElementById('spread-tabs').addEventListener('click', (e) => {
+    const btn = e.target.closest('.tab-btn');
+    if (!btn) return;
+    document.querySelectorAll('#spread-tabs .tab-btn').forEach((b) => b.classList.remove('active'));
+    btn.classList.add('active');
+    buildSpreadChart(btn.dataset.mode);
   });
+
+  document.getElementById('rate-cards').innerHTML = '<div style="color:#6b778c;font-size:13px;">국고채 금리를 불러오는 중...</div>';
+  fetchFinalQuoteRates()
+    .then((rates) => renderRateCards(rates))
+    .catch((err) => {
+      console.error(err);
+      document.getElementById('rate-cards').innerHTML = '<div style="color:#d64545;font-size:13px;">국고채 금리를 불러오지 못했습니다.</div>';
+    });
+
+  renderTopTrades();
+  renderCreditEvents();
+  renderInvestmentOpinions();
+  buildSpreadChart('sector');
+  renderVolumeChart();
 </script>
 
 </body>
