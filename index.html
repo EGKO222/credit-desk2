@@ -348,8 +348,15 @@
   // KOFIA '신용평가정보 > 신용등급 속보(변동사항만)'을 Supabase에 저장해둔 것을 읽어온다.
   // 이 값은 KOFIA가 신용평가 3사로부터 받아 공개 게시하는 속보이며, 변동이 발생한 건의
   // '현재' 등급/전망만 제공한다 (KOFIA 데이터에 '이전' 등급은 포함되어 있지 않음).
+  function daysAgoIsoDate(days) {
+    const d = new Date();
+    d.setDate(d.getDate() - days);
+    return d.toISOString().slice(0, 10);
+  }
+
   async function fetchCreditEvents() {
-    const url = `${SUPABASE_URL}/rest/v1/credit_events?select=company_nm,agency,rating,outlook,bond_series,estimate_day,report_url&order=estimate_day.desc&limit=10`;
+    const since = daysAgoIsoDate(7);
+    const url = `${SUPABASE_URL}/rest/v1/credit_events?select=company_nm,agency,rating,outlook,bond_series,estimate_day,report_url&estimate_day=gte.${since}&order=estimate_day.desc`;
     const res = await fetch(url, {
       headers: {
         apikey: SUPABASE_ANON_KEY,
@@ -361,7 +368,18 @@
       throw new Error(`Supabase 조회 실패: ${res.status}`);
     }
 
-    return res.json();
+    const rows = await res.json();
+
+    // 회사 하나당 가장 최신 이벤트 1건만 남긴다 (estimate_day desc로 정렬돼 있으므로 처음 등장하는 것을 채택)
+    const seen = new Set();
+    const latestPerCompany = [];
+    for (const row of rows) {
+      if (seen.has(row.company_nm)) continue;
+      seen.add(row.company_nm);
+      latestPerCompany.push(row);
+    }
+
+    return latestPerCompany;
   }
 
   // 임시 데이터(나중에 실제 시장 데이터로 교체)
@@ -409,7 +427,7 @@
     container.innerHTML = '';
 
     if (events.length === 0) {
-      container.innerHTML = '<div style="color:#6b778c;font-size:13px;">최근 30일간 등급/전망 변동 건이 없습니다.</div>';
+      container.innerHTML = '<div style="color:#6b778c;font-size:13px;">최근 7일간 등급/전망 변동 건이 없습니다.</div>';
       return;
     }
 
