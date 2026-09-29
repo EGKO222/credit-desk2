@@ -86,7 +86,38 @@ async function fetchBokReleases() {
 
     const title = titleMatch[1].replace(/<!--[\s\S]*?-->/g, "").replace(/\s+/g, " ").trim();
     const isoDate = bokDateToIso(dateMatch[1]);
-    releases.push({ title, date: isoDate });
+    releases.push({ agency: "한국은행", title, date: isoDate });
+  }
+  return releases;
+}
+
+// 기획재정부 '보도·참고자료' 목록에서 최근 2일 내 채권/재정 관련 제목만 뽑아온다.
+// robots.txt에서 특정 경로 2개만 차단하고 나머지는 전부 허용 (해당 없음).
+const MOEF_KEYWORDS = ["금리", "채권", "국채", "재정", "국고채", "발행", "경제전망", "물가", "환율", "예산"];
+
+function moefDateToIso(d) {
+  // "2026.09.22." -> "2026-09-22"
+  const m = d.match(/(\d{4})\.(\d{2})\.(\d{2})/);
+  return m ? `${m[1]}-${m[2]}-${m[3]}` : null;
+}
+
+async function fetchMoefReleases() {
+  const url = "https://www.moef.go.kr/nw/nes/nesdta.do?bbsId=MOSFBBS_000000000028&menuNo=4010100";
+  const res = await fetch(url, { headers: NAVER_HEADERS });
+  if (!res.ok) throw new Error(`기획재정부 보도자료 목록 요청 실패: ${res.status}`);
+  const html = await res.text();
+
+  const items = html.match(/<li>\s*<h3>[\s\S]*?<\/li>/g) || [];
+  const releases = [];
+  for (const item of items) {
+    const titleMatch = item.match(/<h3><a[^>]*>([\s\S]*?)<\/a><\/h3>/);
+    const dateMatch = item.match(/class="date">([\d.]+)<\/span>/);
+    if (!titleMatch || !dateMatch) continue;
+
+    const title = titleMatch[1].replace(/\s+/g, " ").trim();
+    const isoDate = moefDateToIso(dateMatch[1]);
+    if (!isoDate) continue;
+    releases.push({ agency: "기획재정부", title, date: isoDate });
   }
   return releases;
 }
@@ -112,20 +143,20 @@ async function upsertToSupabase(table, rows, onConflict) {
   }
 }
 
-async function summarizeWithGemini(reports, bokTitles) {
+async function summarizeWithGemini(reports, orgTitles) {
   const reportText = reports
     .map((r, i) => `[리포트 ${i + 1}] ${r.brokerName} - ${r.title} (${r.writeDate})\n${r.content}`)
     .join("\n\n---\n\n");
 
-  const bokText = bokTitles.length
-    ? `\n\n---\n\n[한국은행 최근 발표 제목 (본문 없이 제목만, 참고용)]\n${bokTitles.map((b) => `- (${b.date}) ${b.title}`).join("\n")}`
+  const orgText = orgTitles.length
+    ? `\n\n---\n\n[공식기관 최근 발표 제목 (본문 없이 제목만, 참고용)]\n${orgTitles.map((b) => `- (${b.date}) [${b.agency}] ${b.title}`).join("\n")}`
     : "";
 
-  const systemPrompt = `당신은 채권/크레딧 데스크의 애널리스트입니다. 여러 증권사의 채권 리포트 원문과, 한국은행의 최근 발표 제목 목록이 주어집니다.
+  const systemPrompt = `당신은 채권/크레딧 데스크의 애널리스트입니다. 여러 증권사의 채권 리포트 원문과, 한국은행·기획재정부의 최근 발표 제목 목록이 주어집니다.
 이 내용을 종합해서 금리 방향, 일드커브, 수급, 섹터별 크레딧 이슈 중 중요한 것 위주로 정확히 3개의 핵심 포인트로 요약하세요.
 규칙:
-- 증권사 리포트 원문과 한국은행 발표 제목에 실제로 나온 내용만 사용하고, 없는 내용을 추측해서 지어내지 마세요.
-- 한국은행 발표는 제목만 주어지므로, 본문 내용을 지어내지 말고 제목 수준에서만 언급하세요.
+- 증권사 리포트 원문과 공식기관 발표 제목에 실제로 나온 내용만 사용하고, 없는 내용을 추측해서 지어내지 마세요.
+- 공식기관 발표는 제목만 주어지므로, 본문 내용을 지어내지 말고 제목 수준에서만 언급하세요.
 - 각 포인트는 6~12자 내외의 짧은 소제목(heading)과, 2~4문장의 설명(body)으로 구성하세요.
 - 반드시 아래 JSON 배열 형식으로만 응답하고, 다른 텍스트는 출력하지 마세요.
 [{"heading": "...", "body": "..."}, {"heading": "...", "body": "..."}, {"heading": "...", "body": "..."}]`;
@@ -137,7 +168,7 @@ async function summarizeWithGemini(reports, bokTitles) {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         systemInstruction: { parts: [{ text: systemPrompt }] },
-        contents: [{ role: "user", parts: [{ text: reportText + bokText }] }],
+        contents: [{ role: "user", parts: [{ text: reportText + orgText }] }],
         generationConfig: { temperature: 0.2 },
       }),
     }
@@ -201,11 +232,18 @@ const bokTitles = allBokReleases.filter(
 );
 console.log(`한국은행 참고 발표: ${bokTitles.length}건`);
 
-const points = await summarizeWithGemini(reports, bokTitles);
+const allMoefReleases = await fetchMoefReleases();
+const moefTitles = allMoefReleases.filter(
+  (r) => r.date >= cutoff && MOEF_KEYWORDS.some((kw) => r.title.includes(kw))
+);
+console.log(`기획재정부 참고 발표: ${moefTitles.length}건`);
+
+const orgTitles = [...bokTitles, ...moefTitles];
+const points = await summarizeWithGemini(reports, orgTitles);
 
 const sourcesText = [
   reports.map((r) => `${r.brokerName} - ${r.title}`).join(", "),
-  bokTitles.length ? `[한국은행] ${bokTitles.map((b) => b.title).join(", ")}` : "",
+  orgTitles.length ? orgTitles.map((b) => `[${b.agency}] ${b.title}`).join(", ") : "",
 ]
   .filter(Boolean)
   .join(" / ");
