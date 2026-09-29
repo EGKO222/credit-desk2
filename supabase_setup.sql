@@ -89,3 +89,21 @@ alter table investment_opinions enable row level security;
 create policy "anyone can read investment_opinions"
   on investment_opinions for select
   using (true);
+
+-- 증권사 리포트 원문을 AI(Gemini)로 요약한 3꼭지 시황 의견.
+-- investment_opinions(리포트 목록)는 그대로 두고, 대시보드는 이 테이블을 대신 읽는다.
+create table if not exists market_opinion_summary (
+  summary_date date not null,
+  point_order integer not null,
+  heading text not null,
+  body text not null,
+  sources text,
+  updated_at timestamptz not null default now(),
+  primary key (summary_date, point_order)
+);
+
+alter table market_opinion_summary enable row level security;
+
+create policy "anyone can read market_opinion_summary"
+  on market_opinion_summary for select
+  using (true);

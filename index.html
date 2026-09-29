@@ -406,14 +406,16 @@
     return latestPerCompany;
   }
 
-  // 네이버 증권 '리서치 > 채권분석'의 최근 2일 자료를 읽어온다 (제목/증권사/날짜/원문 링크만 — 저작권 보호를 위해 본문은 저장하지 않음).
+  // 네이버 증권 '리서치 > 채권분석'의 최근 2일 리포트 원문을 Gemini로 요약한 3꼭지 시황 의견을 읽어온다.
   async function fetchInvestmentOpinions() {
-    const url = `${SUPABASE_URL}/rest/v1/investment_opinions?select=title,broker_name,write_date,url&order=write_date.desc`;
+    const url = `${SUPABASE_URL}/rest/v1/market_opinion_summary?select=summary_date,point_order,heading,body,sources&order=summary_date.desc,point_order.asc&limit=3`;
     const res = await fetch(url, {
       headers: { apikey: SUPABASE_ANON_KEY, Authorization: `Bearer ${SUPABASE_ANON_KEY}` },
     });
     if (!res.ok) throw new Error(`Supabase 조회 실패: ${res.status}`);
-    return res.json();
+    const rows = await res.json();
+    if (rows.length === 0) return { date: null, points: [] };
+    return { date: rows[0].summary_date, points: rows };
   }
 
   function renderRateCards(rates) {
@@ -482,21 +484,22 @@
     });
   }
 
-  function renderInvestmentOpinions(opinions) {
+  function renderInvestmentOpinions({ date, points }) {
     const container = document.getElementById('investment-opinions');
     container.innerHTML = '';
 
-    if (opinions.length === 0) {
-      container.innerHTML = '<div style="color:#6b778c;font-size:13px;">최근 2일간 등록된 채권분석 리서치가 없습니다.</div>';
+    if (points.length === 0) {
+      container.innerHTML = '<div style="color:#6b778c;font-size:13px;">아직 생성된 요약이 없습니다.</div>';
       return;
     }
 
-    opinions.forEach((op) => {
+    points.forEach((p) => {
       const div = document.createElement('div');
       div.className = 'opinion-item';
       div.innerHTML = `
-        <div class="title"><a href="${op.url}" target="_blank" rel="noopener">${op.title}</a></div>
-        <div class="meta">${op.broker_name} · ${op.write_date}</div>
+        <div class="title">${p.point_order}. ${p.heading}</div>
+        <div class="meta">AI 요약(Gemini) · ${date}</div>
+        <div>${p.body}</div>
       `;
       container.appendChild(div);
     });
