@@ -29,3 +29,19 @@ alter table credit_events enable row level security;
 create policy "anyone can read credit_events"
   on credit_events for select
   using (true);
+
+create table if not exists top_trades (
+  trade_date date not null,
+  issuer text not null,
+  rating text,
+  amount_eok numeric not null,
+  trade_count integer not null,
+  updated_at timestamptz not null default now(),
+  primary key (trade_date, issuer)
+);
+
+alter table top_trades enable row level security;
+
+create policy "anyone can read top_trades"
+  on top_trades for select
+  using (true);

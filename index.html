@@ -336,14 +336,23 @@
     { sector: '일반', value: 15.2 },
   ];
 
-  // 임시 데이터(나중에 실제 시장 데이터로 교체)
-  const topTrades = [
-    { issuer: 'OO카드', grade: 'AA+', amount: 1280, count: 34 },
-    { issuer: 'OO캐피탈', grade: 'AA-', amount: 940, count: 27 },
-    { issuer: 'OO증권', grade: 'AA', amount: 810, count: 19 },
-    { issuer: 'OO건설', grade: 'A+', amount: 655, count: 22 },
-    { issuer: 'OO에너지', grade: 'AAA', amount: 590, count: 12 },
-  ];
+  // KOFIA '유통시장 > 실시간 체결정보 > 일자별 거래현황'의 전영업일 회사채 거래를
+  // 발행자 기준으로 집계해 Supabase에 저장해둔 것을 읽어온다 (매매금액 단위: 억원).
+  async function fetchTopTrades() {
+    const url = `${SUPABASE_URL}/rest/v1/top_trades?select=issuer,rating,amount_eok,trade_count&order=trade_date.desc,amount_eok.desc&limit=5`;
+    const res = await fetch(url, {
+      headers: {
+        apikey: SUPABASE_ANON_KEY,
+        Authorization: `Bearer ${SUPABASE_ANON_KEY}`,
+      },
+    });
+
+    if (!res.ok) {
+      throw new Error(`Supabase 조회 실패: ${res.status}`);
+    }
+
+    return res.json();
+  }
 
   // KOFIA '신용평가정보 > 신용등급 속보(변동사항만)'을 Supabase에 저장해둔 것을 읽어온다.
   // 이 값은 KOFIA가 신용평가 3사로부터 받아 공개 게시하는 속보이며, 변동이 발생한 건의
@@ -408,15 +417,22 @@
     });
   }
 
-  function renderTopTrades() {
+  function renderTopTrades(rows) {
     const body = document.getElementById('top-trades-body');
-    topTrades.forEach((row) => {
+    body.innerHTML = '';
+
+    if (rows.length === 0) {
+      body.innerHTML = '<tr><td colspan="4" style="color:#6b778c;">데이터가 없습니다.</td></tr>';
+      return;
+    }
+
+    rows.forEach((row) => {
       const tr = document.createElement('tr');
       tr.innerHTML = `
         <td>${row.issuer}</td>
-        <td>${row.grade}</td>
-        <td class="num">${row.amount.toLocaleString('ko-KR')}</td>
-        <td class="num">${row.count}</td>
+        <td>${row.rating || '-'}</td>
+        <td class="num">${Number(row.amount_eok).toLocaleString('ko-KR')}</td>
+        <td class="num">${row.trade_count}</td>
       `;
       body.appendChild(tr);
     });
@@ -540,7 +556,13 @@
       document.getElementById('rate-cards').innerHTML = '<div style="color:#d64545;font-size:13px;">국고채 금리를 불러오지 못했습니다.</div>';
     });
 
-  renderTopTrades();
+  document.getElementById('top-trades-body').innerHTML = '<tr><td colspan="4" style="color:#6b778c;">불러오는 중...</td></tr>';
+  fetchTopTrades()
+    .then((rows) => renderTopTrades(rows))
+    .catch((err) => {
+      console.error(err);
+      document.getElementById('top-trades-body').innerHTML = '<tr><td colspan="4" style="color:#d64545;">전일 매매 데이터를 불러오지 못했습니다.</td></tr>';
+    });
 
   document.getElementById('credit-events').innerHTML = '<div style="color:#6b778c;font-size:13px;">크레딧 이벤트를 불러오는 중...</div>';
   fetchCreditEvents()
