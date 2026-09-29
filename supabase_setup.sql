@@ -45,3 +45,47 @@ alter table top_trades enable row level security;
 create policy "anyone can read top_trades"
   on top_trades for select
   using (true);
+
+create table if not exists sector_volume (
+  trade_date date not null,
+  sector text not null,
+  volume_jo numeric not null,
+  updated_at timestamptz not null default now(),
+  primary key (trade_date, sector)
+);
+
+alter table sector_volume enable row level security;
+
+create policy "anyone can read sector_volume"
+  on sector_volume for select
+  using (true);
+
+create table if not exists spreads (
+  trade_date date not null,
+  category_type text not null,
+  category_name text not null,
+  spread_bp numeric not null,
+  updated_at timestamptz not null default now(),
+  primary key (trade_date, category_type, category_name)
+);
+
+alter table spreads enable row level security;
+
+create policy "anyone can read spreads"
+  on spreads for select
+  using (true);
+
+create table if not exists investment_opinions (
+  research_id bigint primary key,
+  title text not null,
+  broker_name text not null,
+  write_date date not null,
+  url text not null,
+  updated_at timestamptz not null default now()
+);
+
+alter table investment_opinions enable row level security;
+
+create policy "anyone can read investment_opinions"
+  on investment_opinions for select
+  using (true);

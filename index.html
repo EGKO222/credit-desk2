@@ -301,40 +301,55 @@
     }));
   }
 
-  // 임시 데이터(나중에 실제 시장 데이터로 교체)
-  const spreadDates = ['9/17', '9/18', '9/19', '9/20', '9/21', '9/22', '9/23'];
+  // KOFIA '일자별 거래현황'(Top5 매매와 동일 소스)에서 계산한 국고채 대비 스프레드(최근 7영업일)를 읽어온다.
+  // 섹터 구분은 KOFIA의 채권종류 분류(국채/지방채/특수채/통안증권/은행채/기타금융채/회사채/ABS)를 그대로 사용한다.
+  const CHART_COLORS = ['#2563eb', '#059669', '#d97706', '#7c3aed', '#dc2626', '#0891b2', '#db2777', '#65a30d'];
 
-  const spreadDatasets = {
-    sector: [
-      { name: '금융', color: '#2563eb', data: [48, 47, 46, 45, 44, 43, 42] },
-      { name: '카드', color: '#059669', data: [58, 59, 57, 56, 55, 54, 53] },
-      { name: '캐피탈', color: '#d97706', data: [82, 81, 83, 80, 79, 78, 77] },
-      { name: '공사공단', color: '#7c3aed', data: [18, 18, 17, 17, 16, 16, 15] },
-      { name: '일반', color: '#dc2626', data: [70, 72, 71, 73, 74, 73, 75] },
-    ],
-    grade: [
-      { name: 'AAA', color: '#2563eb', data: [28, 27, 27, 26, 26, 25, 25] },
-      { name: 'AA+', color: '#059669', data: [40, 41, 40, 39, 39, 38, 38] },
-      { name: 'AA', color: '#d97706', data: [52, 53, 52, 54, 53, 55, 54] },
-      { name: 'AA-', color: '#7c3aed', data: [68, 69, 70, 71, 70, 72, 73] },
-      { name: 'A+', color: '#dc2626', data: [105, 107, 108, 110, 112, 111, 113] },
-    ],
-    period: [
-      { name: '1년', color: '#2563eb', data: [38, 37, 37, 36, 36, 35, 35] },
-      { name: '3년', color: '#059669', data: [52, 53, 52, 53, 54, 53, 55] },
-      { name: '5년', color: '#d97706', data: [63, 64, 65, 64, 66, 65, 67] },
-      { name: '10년', color: '#dc2626', data: [78, 79, 80, 81, 80, 82, 83] },
-    ],
-  };
+  async function fetchSpreads() {
+    const url = `${SUPABASE_URL}/rest/v1/spreads?select=trade_date,category_type,category_name,spread_bp&order=trade_date.asc`;
+    const res = await fetch(url, {
+      headers: { apikey: SUPABASE_ANON_KEY, Authorization: `Bearer ${SUPABASE_ANON_KEY}` },
+    });
+    if (!res.ok) throw new Error(`Supabase 조회 실패: ${res.status}`);
+    const rows = await res.json();
 
-  // 임시 데이터(나중에 실제 시장 데이터로 교체) - 단위: 조원
-  const sectorVolume = [
-    { sector: '금융', value: 12.3 },
-    { sector: '카드', value: 4.1 },
-    { sector: '캐피탈', value: 6.7 },
-    { sector: '공사공단', value: 9.8 },
-    { sector: '일반', value: 15.2 },
-  ];
+    const dates = Array.from(new Set(rows.map((r) => r.trade_date))).sort();
+    const byType = { sector: {}, grade: {}, period: {} };
+    for (const row of rows) {
+      const bucket = byType[row.category_type];
+      if (!bucket) continue;
+      if (!bucket[row.category_name]) bucket[row.category_name] = {};
+      bucket[row.category_name][row.trade_date] = Number(row.spread_bp);
+    }
+
+    const datasets = {};
+    for (const type of Object.keys(byType)) {
+      const names = Object.keys(byType[type]).sort();
+      datasets[type] = names.map((name, i) => ({
+        name,
+        color: CHART_COLORS[i % CHART_COLORS.length],
+        data: dates.map((d) => byType[type][name][d] ?? null),
+      }));
+    }
+
+    return { dates: dates.map((d) => d.slice(5).replace('-', '/')), datasets };
+  }
+
+  // KOFIA '일자별 거래현황'에서 집계한 전영업일 섹터별(채권종류별) 유통 물량을 읽어온다 (단위: 조원).
+  async function fetchSectorVolume() {
+    const url = `${SUPABASE_URL}/rest/v1/sector_volume?select=trade_date,sector,volume_jo&order=trade_date.desc`;
+    const res = await fetch(url, {
+      headers: { apikey: SUPABASE_ANON_KEY, Authorization: `Bearer ${SUPABASE_ANON_KEY}` },
+    });
+    if (!res.ok) throw new Error(`Supabase 조회 실패: ${res.status}`);
+    const rows = await res.json();
+    if (rows.length === 0) return [];
+
+    const latestDate = rows[0].trade_date;
+    return rows
+      .filter((r) => r.trade_date === latestDate)
+      .map((r) => ({ sector: r.sector, value: Number(r.volume_jo) }));
+  }
 
   // KOFIA '유통시장 > 실시간 체결정보 > 일자별 거래현황'의 전영업일 회사채 거래를
   // 발행자 기준으로 집계해 Supabase에 저장해둔 것을 읽어온다 (매매금액 단위: 억원).
@@ -391,12 +406,15 @@
     return latestPerCompany;
   }
 
-  // 임시 데이터(나중에 실제 시장 데이터로 교체)
-  const investmentOpinions = [
-    { title: 'AA- 등급 회사채 비중확대 의견', house: 'OO증권 리서치', date: '2026-09-23', summary: '금리 인하 기대와 함께 크레딧 스프레드 추가 축소 여력이 있다고 판단.' },
-    { title: '은행채 대비 카드채 스프레드 확대 전망', house: 'XX증권 리서치', date: '2026-09-22', summary: '카드사 조달 부담 증가로 단기 스프레드 확대 가능성 제시.' },
-    { title: '공사채 저가매수 접근 유효', house: 'YY자산운용', date: '2026-09-20', summary: '국고채 대비 스프레드가 과거 평균 대비 높은 구간이라는 판단.' },
-  ];
+  // 네이버 증권 '리서치 > 채권분석'의 최근 2일 자료를 읽어온다 (제목/증권사/날짜/원문 링크만 — 저작권 보호를 위해 본문은 저장하지 않음).
+  async function fetchInvestmentOpinions() {
+    const url = `${SUPABASE_URL}/rest/v1/investment_opinions?select=title,broker_name,write_date,url&order=write_date.desc`;
+    const res = await fetch(url, {
+      headers: { apikey: SUPABASE_ANON_KEY, Authorization: `Bearer ${SUPABASE_ANON_KEY}` },
+    });
+    if (!res.ok) throw new Error(`Supabase 조회 실패: ${res.status}`);
+    return res.json();
+  }
 
   function renderRateCards(rates) {
     const container = document.getElementById('rate-cards');
@@ -464,21 +482,29 @@
     });
   }
 
-  function renderInvestmentOpinions() {
+  function renderInvestmentOpinions(opinions) {
     const container = document.getElementById('investment-opinions');
-    investmentOpinions.forEach((op) => {
+    container.innerHTML = '';
+
+    if (opinions.length === 0) {
+      container.innerHTML = '<div style="color:#6b778c;font-size:13px;">최근 2일간 등록된 채권분석 리서치가 없습니다.</div>';
+      return;
+    }
+
+    opinions.forEach((op) => {
       const div = document.createElement('div');
       div.className = 'opinion-item';
       div.innerHTML = `
-        <div class="title">${op.title}</div>
-        <div class="meta">${op.house} · ${op.date}</div>
-        <div>${op.summary}</div>
+        <div class="title"><a href="${op.url}" target="_blank" rel="noopener">${op.title}</a></div>
+        <div class="meta">${op.broker_name} · ${op.write_date}</div>
       `;
       container.appendChild(div);
     });
   }
 
   let spreadChart;
+  let spreadDates = [];
+  let spreadDatasets = { sector: [], grade: [], period: [] };
 
   function buildSpreadChart(mode) {
     const ctx = document.getElementById('spread-chart');
@@ -491,6 +517,7 @@
       backgroundColor: s.color,
       tension: 0.3,
       pointRadius: 2,
+      spanGaps: true,
     }));
 
     if (spreadChart) {
@@ -516,7 +543,7 @@
     });
   }
 
-  function renderVolumeChart() {
+  function renderVolumeChart(sectorVolume) {
     const ctx = document.getElementById('volume-chart');
     new Chart(ctx, {
       type: 'bar',
@@ -572,9 +599,25 @@
       document.getElementById('credit-events').innerHTML = '<div style="color:#d64545;font-size:13px;">크레딧 이벤트를 불러오지 못했습니다.</div>';
     });
 
-  renderInvestmentOpinions();
-  buildSpreadChart('sector');
-  renderVolumeChart();
+  document.getElementById('investment-opinions').innerHTML = '<div style="color:#6b778c;font-size:13px;">투자의견을 불러오는 중...</div>';
+  fetchInvestmentOpinions()
+    .then((opinions) => renderInvestmentOpinions(opinions))
+    .catch((err) => {
+      console.error(err);
+      document.getElementById('investment-opinions').innerHTML = '<div style="color:#d64545;font-size:13px;">투자의견을 불러오지 못했습니다.</div>';
+    });
+
+  fetchSpreads()
+    .then(({ dates, datasets }) => {
+      spreadDates = dates;
+      spreadDatasets = datasets;
+      buildSpreadChart(document.querySelector('#spread-tabs .tab-btn.active').dataset.mode);
+    })
+    .catch((err) => console.error(err));
+
+  fetchSectorVolume()
+    .then((rows) => renderVolumeChart(rows))
+    .catch((err) => console.error(err));
 </script>
 
 </body>
