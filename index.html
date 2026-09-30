@@ -38,6 +38,28 @@
     color: #b7c3d9;
   }
 
+  .date-picker-wrap {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    background-color: rgba(255, 255, 255, 0.08);
+    border-radius: 6px;
+    padding: 6px 10px;
+  }
+
+  .date-picker-wrap label {
+    font-size: 13px;
+    color: #b7c3d9;
+  }
+
+  .date-picker-wrap input[type="date"] {
+    border: none;
+    background: transparent;
+    color: #ffffff;
+    font-size: 13px;
+    font-family: inherit;
+  }
+
   main {
     padding: 24px 32px;
     display: flex;
@@ -241,7 +263,10 @@
 
 <header>
   <h1>크레딧 채권 매매 대시보드</h1>
-  <span class="as-of">기준일: 2026-09-23 (장 마감) · 데이터: 임시 데이터, 추후 실제 시장 데이터로 교체 예정 · 참고: 금융투자협회 채권정보센터(KOFIA BIS)</span>
+  <div class="date-picker-wrap">
+    <label for="as-of-date">기준일</label>
+    <input type="date" id="as-of-date">
+  </div>
 </header>
 
 <main>
@@ -362,8 +387,10 @@
 
   const TENOR_ORDER = ['국고채 3년', '국고채 5년', '국고채 10년', '국고채 30년'];
 
-  async function fetchFinalQuoteRates() {
-    const url = `${SUPABASE_URL}/rest/v1/kofia_rates?select=tenor,rate,change_bp&order=tenor`;
+  async function fetchFinalQuoteRates(date) {
+    // 종목별 최종호가일자가 서로 다를 수 있어(유동성 낮은 만기는 며칠 전 값일 수 있음),
+    // 선택한 기준일 이하 중 각 만기별로 가장 최근 값을 쓴다.
+    const url = `${SUPABASE_URL}/rest/v1/kofia_rates?select=tenor,rate,change_bp,as_of_date&as_of_date=lte.${date}&order=as_of_date.desc`;
     const res = await fetch(url, {
       headers: {
         apikey: SUPABASE_ANON_KEY,
@@ -376,7 +403,10 @@
     }
 
     const rows = await res.json();
-    const byTenor = Object.fromEntries(rows.map((r) => [r.tenor, r]));
+    const byTenor = {};
+    for (const r of rows) {
+      if (!byTenor[r.tenor]) byTenor[r.tenor] = r;
+    }
 
     return TENOR_ORDER.filter((t) => byTenor[t]).map((t) => ({
       tenor: t,
@@ -395,13 +425,17 @@
   let spreadCells = []; // { trade_date, sector, grade, maturity_bucket, spread_bp, trade_count }
   const spreadFilter = { sectors: new Set(SECTOR_TYPES), grades: new Set(), maturities: new Set() };
 
-  async function fetchSpreadCells() {
-    const url = `${SUPABASE_URL}/rest/v1/spread_cells?select=trade_date,sector,grade,maturity_bucket,spread_bp,trade_count&order=trade_date.asc`;
+  async function fetchSpreadCells(date) {
+    const url = `${SUPABASE_URL}/rest/v1/spread_cells?select=trade_date,sector,grade,maturity_bucket,spread_bp,trade_count&trade_date=lte.${date}&order=trade_date.desc`;
     const res = await fetch(url, {
       headers: { apikey: SUPABASE_ANON_KEY, Authorization: `Bearer ${SUPABASE_ANON_KEY}` },
     });
     if (!res.ok) throw new Error(`Supabase 조회 실패: ${res.status}`);
-    return res.json();
+    const rows = await res.json();
+
+    // 기준일 이전(포함) 중 가장 최근 7영업일치만 사용
+    const recentDates = new Set(Array.from(new Set(rows.map((r) => r.trade_date))).slice(0, 7));
+    return rows.filter((r) => recentDates.has(r.trade_date));
   }
 
   function buildSpreadDatasetsFromCells(cells, filter) {
@@ -437,8 +471,8 @@
   const volumeFilter = { sectors: new Set(SECTOR_TYPES), grades: new Set(), maturities: new Set() };
   let volumeCells = [];
 
-  async function fetchVolumeCells() {
-    const url = `${SUPABASE_URL}/rest/v1/volume_cells?select=trade_date,sector,grade,maturity_bucket,volume_jo&order=trade_date.desc`;
+  async function fetchVolumeCells(date) {
+    const url = `${SUPABASE_URL}/rest/v1/volume_cells?select=trade_date,sector,grade,maturity_bucket,volume_jo&trade_date=lte.${date}&order=trade_date.desc`;
     const res = await fetch(url, {
       headers: { apikey: SUPABASE_ANON_KEY, Authorization: `Bearer ${SUPABASE_ANON_KEY}` },
     });
@@ -464,8 +498,8 @@
 
   // KOFIA '유통시장 > 실시간 체결정보 > 일자별 거래현황'의 전영업일 회사채 거래를
   // 발행자 기준으로 집계해 Supabase에 저장해둔 것을 읽어온다 (매매금액 단위: 억원).
-  async function fetchTopTrades() {
-    const url = `${SUPABASE_URL}/rest/v1/top_trades?select=issuer,rating,amount_eok,trade_count&order=trade_date.desc,amount_eok.desc&limit=5`;
+  async function fetchTopTrades(date) {
+    const url = `${SUPABASE_URL}/rest/v1/top_trades?select=trade_date,issuer,rating,amount_eok,trade_count&trade_date=lte.${date}&order=trade_date.desc,amount_eok.desc&limit=200`;
     const res = await fetch(url, {
       headers: {
         apikey: SUPABASE_ANON_KEY,
@@ -477,21 +511,24 @@
       throw new Error(`Supabase 조회 실패: ${res.status}`);
     }
 
-    return res.json();
+    const rows = await res.json();
+    if (rows.length === 0) return [];
+    const latestDate = rows[0].trade_date;
+    return rows.filter((r) => r.trade_date === latestDate).slice(0, 5);
   }
 
   // KOFIA '신용평가정보 > 신용등급 속보(변동사항만)'을 Supabase에 저장해둔 것을 읽어온다.
   // 이 값은 KOFIA가 신용평가 3사로부터 받아 공개 게시하는 속보이며, 변동이 발생한 건의
   // '현재' 등급/전망만 제공한다 (KOFIA 데이터에 '이전' 등급은 포함되어 있지 않음).
-  function daysAgoIsoDate(days) {
-    const d = new Date();
-    d.setDate(d.getDate() - days);
+  function isoDaysBefore(isoDate, days) {
+    const d = new Date(`${isoDate}T00:00:00Z`);
+    d.setUTCDate(d.getUTCDate() - days);
     return d.toISOString().slice(0, 10);
   }
 
-  async function fetchCreditEvents() {
-    const since = daysAgoIsoDate(7);
-    const url = `${SUPABASE_URL}/rest/v1/credit_events?select=company_nm,agency,rating,outlook,bond_series,estimate_day,report_url&estimate_day=gte.${since}&order=estimate_day.desc`;
+  async function fetchCreditEvents(date) {
+    const since = isoDaysBefore(date, 6);
+    const url = `${SUPABASE_URL}/rest/v1/credit_events?select=company_nm,agency,rating,outlook,bond_series,estimate_day,report_url&estimate_day=gte.${since}&estimate_day=lte.${date}&order=estimate_day.desc`;
     const res = await fetch(url, {
       headers: {
         apikey: SUPABASE_ANON_KEY,
@@ -518,8 +555,8 @@
   }
 
   // 네이버 증권 '리서치 > 채권분석'의 최근 2일 리포트 원문을 Gemini로 요약한 3꼭지 시황 의견을 읽어온다.
-  async function fetchInvestmentOpinions() {
-    const url = `${SUPABASE_URL}/rest/v1/market_opinion_summary?select=summary_date,point_order,heading,body,sources&order=summary_date.desc,point_order.asc&limit=3`;
+  async function fetchInvestmentOpinions(date) {
+    const url = `${SUPABASE_URL}/rest/v1/market_opinion_summary?select=summary_date,point_order,heading,body,sources&summary_date=lte.${date}&order=summary_date.desc,point_order.asc&limit=3`;
     const res = await fetch(url, {
       headers: { apikey: SUPABASE_ANON_KEY, Authorization: `Bearer ${SUPABASE_ANON_KEY}` },
     });
@@ -719,14 +756,18 @@
 
   wireFilterPills('filter-sector', spreadFilter.sectors, renderSpreadChart);
   wireFilterPills('filter-maturity', spreadFilter.maturities, renderSpreadChart);
+  wireFilterPills('filter-grade', spreadFilter.grades, renderSpreadChart);
   wireFilterPills('vol-filter-sector', volumeFilter.sectors, renderVolumeChart);
   wireFilterPills('vol-filter-maturity', volumeFilter.maturities, renderVolumeChart);
+  wireFilterPills('vol-filter-grade', volumeFilter.grades, renderVolumeChart);
 
   document.querySelectorAll('#filter-sector .pill-btn, #vol-filter-sector .pill-btn').forEach((btn) => {
     btn.classList.add('active');
   });
 
-  function populateGradeFilter(containerId, cells, filterSet, onChange) {
+  // 등급 목록은 선택된 기준일의 데이터에 따라 달라지므로, 필터 값(Set)은 유지한 채 버튼만 다시 그린다.
+  // 이벤트 리스너는 위에서 컨테이너에 한 번만(이벤트 위임) 걸어뒀으므로 여기서는 다시 걸지 않는다.
+  function populateGradeFilter(containerId, cells, filterSet) {
     const found = Array.from(new Set(cells.map((c) => c.grade)));
     found.sort((a, b) => {
       const ia = GRADE_ORDER.indexOf(a);
@@ -741,61 +782,86 @@
     container.innerHTML = '';
     found.forEach((grade) => {
       const btn = document.createElement('button');
-      btn.className = 'pill-btn';
+      btn.className = 'pill-btn' + (filterSet.has(grade) ? ' active' : '');
       btn.dataset.value = grade;
       btn.textContent = grade;
       container.appendChild(btn);
     });
-    wireFilterPills(containerId, filterSet, onChange);
   }
 
-  document.getElementById('rate-cards').innerHTML = '<div style="color:#6b778c;font-size:13px;">국고채 금리를 불러오는 중...</div>';
-  fetchFinalQuoteRates()
-    .then((rates) => renderRateCards(rates))
-    .catch((err) => {
-      console.error(err);
-      document.getElementById('rate-cards').innerHTML = '<div style="color:#d64545;font-size:13px;">국고채 금리를 불러오지 못했습니다.</div>';
-    });
+  // 기준일 하나로 대시보드 전체(금리·Top5·크레딧이벤트·스프레드·유통물량·투자의견)를 다시 불러온다.
+  function loadDashboard(date) {
+    document.getElementById('rate-cards').innerHTML = '<div style="color:#6b778c;font-size:13px;">국고채 금리를 불러오는 중...</div>';
+    fetchFinalQuoteRates(date)
+      .then((rates) => renderRateCards(rates))
+      .catch((err) => {
+        console.error(err);
+        document.getElementById('rate-cards').innerHTML = '<div style="color:#d64545;font-size:13px;">국고채 금리를 불러오지 못했습니다.</div>';
+      });
 
-  document.getElementById('top-trades-body').innerHTML = '<tr><td colspan="4" style="color:#6b778c;">불러오는 중...</td></tr>';
-  fetchTopTrades()
-    .then((rows) => renderTopTrades(rows))
-    .catch((err) => {
-      console.error(err);
-      document.getElementById('top-trades-body').innerHTML = '<tr><td colspan="4" style="color:#d64545;">전일 매매 데이터를 불러오지 못했습니다.</td></tr>';
-    });
+    document.getElementById('top-trades-body').innerHTML = '<tr><td colspan="4" style="color:#6b778c;">불러오는 중...</td></tr>';
+    fetchTopTrades(date)
+      .then((rows) => renderTopTrades(rows))
+      .catch((err) => {
+        console.error(err);
+        document.getElementById('top-trades-body').innerHTML = '<tr><td colspan="4" style="color:#d64545;">전일 매매 데이터를 불러오지 못했습니다.</td></tr>';
+      });
 
-  document.getElementById('credit-events').innerHTML = '<div style="color:#6b778c;font-size:13px;">크레딧 이벤트를 불러오는 중...</div>';
-  fetchCreditEvents()
-    .then((events) => renderCreditEvents(events))
-    .catch((err) => {
-      console.error(err);
-      document.getElementById('credit-events').innerHTML = '<div style="color:#d64545;font-size:13px;">크레딧 이벤트를 불러오지 못했습니다.</div>';
-    });
+    document.getElementById('credit-events').innerHTML = '<div style="color:#6b778c;font-size:13px;">크레딧 이벤트를 불러오는 중...</div>';
+    fetchCreditEvents(date)
+      .then((events) => renderCreditEvents(events))
+      .catch((err) => {
+        console.error(err);
+        document.getElementById('credit-events').innerHTML = '<div style="color:#d64545;font-size:13px;">크레딧 이벤트를 불러오지 못했습니다.</div>';
+      });
 
-  document.getElementById('investment-opinions').innerHTML = '<div style="color:#6b778c;font-size:13px;">투자의견을 불러오는 중...</div>';
-  fetchInvestmentOpinions()
-    .then((opinions) => renderInvestmentOpinions(opinions))
-    .catch((err) => {
-      console.error(err);
-      document.getElementById('investment-opinions').innerHTML = '<div style="color:#d64545;font-size:13px;">투자의견을 불러오지 못했습니다.</div>';
-    });
+    document.getElementById('investment-opinions').innerHTML = '<div style="color:#6b778c;font-size:13px;">투자의견을 불러오는 중...</div>';
+    fetchInvestmentOpinions(date)
+      .then((opinions) => renderInvestmentOpinions(opinions))
+      .catch((err) => {
+        console.error(err);
+        document.getElementById('investment-opinions').innerHTML = '<div style="color:#d64545;font-size:13px;">투자의견을 불러오지 못했습니다.</div>';
+      });
 
-  fetchSpreadCells()
-    .then((cells) => {
-      spreadCells = cells;
-      populateGradeFilter('filter-grade', cells, spreadFilter.grades, renderSpreadChart);
-      renderSpreadChart();
+    fetchSpreadCells(date)
+      .then((cells) => {
+        spreadCells = cells;
+        populateGradeFilter('filter-grade', cells, spreadFilter.grades);
+        renderSpreadChart();
+      })
+      .catch((err) => console.error(err));
+
+    fetchVolumeCells(date)
+      .then((cells) => {
+        volumeCells = cells;
+        populateGradeFilter('vol-filter-grade', cells, volumeFilter.grades);
+        renderVolumeChart();
+      })
+      .catch((err) => console.error(err));
+  }
+
+  const dateInput = document.getElementById('as-of-date');
+  dateInput.addEventListener('change', () => {
+    if (dateInput.value) loadDashboard(dateInput.value);
+  });
+
+  // 기본 기준일 = spread_cells의 가장 최근 거래일
+  fetch(`${SUPABASE_URL}/rest/v1/spread_cells?select=trade_date&order=trade_date.desc&limit=1`, {
+    headers: { apikey: SUPABASE_ANON_KEY, Authorization: `Bearer ${SUPABASE_ANON_KEY}` },
+  })
+    .then((res) => res.json())
+    .then((rows) => {
+      const defaultDate = rows[0]?.trade_date || new Date().toISOString().slice(0, 10);
+      dateInput.value = defaultDate;
+      dateInput.max = defaultDate;
+      loadDashboard(defaultDate);
     })
-    .catch((err) => console.error(err));
-
-  fetchVolumeCells()
-    .then((cells) => {
-      volumeCells = cells;
-      populateGradeFilter('vol-filter-grade', cells, volumeFilter.grades, renderVolumeChart);
-      renderVolumeChart();
-    })
-    .catch((err) => console.error(err));
+    .catch((err) => {
+      console.error(err);
+      const fallback = new Date().toISOString().slice(0, 10);
+      dateInput.value = fallback;
+      loadDashboard(fallback);
+    });
 </script>
 
 </body>

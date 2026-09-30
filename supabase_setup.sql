@@ -12,6 +12,10 @@ create policy "anyone can read kofia_rates"
   on kofia_rates for select
   using (true);
 
+-- 기준일별 이력을 남기기 위해 기본키를 (tenor, as_of_date)로 변경 (기존에는 tenor만 있어서 매일 덮어썼음)
+alter table kofia_rates drop constraint if exists kofia_rates_pkey;
+alter table kofia_rates add primary key (tenor, as_of_date);
+
 create table if not exists credit_events (
   event_key text primary key,
   company_nm text not null,
