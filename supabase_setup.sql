@@ -94,6 +94,23 @@ create policy "anyone can read spread_cells"
   on spread_cells for select
   using (true);
 
+-- 유형(공사채/은행채/여전채/회사채) x 등급 x 만기구간 조합별 유통 물량(조원).
+create table if not exists volume_cells (
+  trade_date date not null,
+  sector text not null,
+  grade text not null,
+  maturity_bucket text not null,
+  volume_jo numeric not null,
+  updated_at timestamptz not null default now(),
+  primary key (trade_date, sector, grade, maturity_bucket)
+);
+
+alter table volume_cells enable row level security;
+
+create policy "anyone can read volume_cells"
+  on volume_cells for select
+  using (true);
+
 create table if not exists investment_opinions (
   research_id bigint primary key,
   title text not null,

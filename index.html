@@ -290,9 +290,37 @@
 
       <section class="panel">
         <h2>섹터별 유통 물량</h2>
+        <div class="filter-group">
+          <div class="filter-label">유형</div>
+          <div class="pill-row" id="vol-filter-sector">
+            <button class="pill-btn" data-value="공사채">공사채</button>
+            <button class="pill-btn" data-value="은행채">은행채</button>
+            <button class="pill-btn" data-value="여전채">여전채</button>
+            <button class="pill-btn" data-value="회사채">회사채</button>
+          </div>
+        </div>
+        <div class="filter-group">
+          <div class="filter-label">등급</div>
+          <div class="pill-row" id="vol-filter-grade"></div>
+        </div>
+        <div class="filter-group">
+          <div class="filter-label">만기</div>
+          <div class="pill-row" id="vol-filter-maturity">
+            <button class="pill-btn" data-value="3개월">3개월</button>
+            <button class="pill-btn" data-value="6개월">6개월</button>
+            <button class="pill-btn" data-value="1년 이내">1년 이내</button>
+            <button class="pill-btn" data-value="1년~1.5년">1년~1.5년</button>
+            <button class="pill-btn" data-value="1.5년~2년">1.5년~2년</button>
+            <button class="pill-btn" data-value="2년~2.5년">2년~2.5년</button>
+            <button class="pill-btn" data-value="2.5년~3년">2.5년~3년</button>
+            <button class="pill-btn" data-value="3년~5년">3년~5년</button>
+            <button class="pill-btn" data-value="5년 초과">5년 초과</button>
+          </div>
+        </div>
         <div class="chart-wrap short">
           <canvas id="volume-chart"></canvas>
         </div>
+        <div id="volume-empty-msg" style="display:none;color:#6b778c;font-size:13px;margin-top:8px;">선택한 조건에 해당하는 데이터가 없습니다.</div>
       </section>
     </div>
 
@@ -403,20 +431,35 @@
     return { dates: dates.map((d) => d.slice(5).replace('-', '/')), datasets };
   }
 
-  // KOFIA '일자별 거래현황'에서 집계한 전영업일 섹터별(채권종류별) 유통 물량을 읽어온다 (단위: 조원).
-  async function fetchSectorVolume() {
-    const url = `${SUPABASE_URL}/rest/v1/sector_volume?select=trade_date,sector,volume_jo&order=trade_date.desc`;
+  // KOFIA '일자별 거래현황'에서 집계한, 유형(공사채/은행채/여전채/회사채) x 등급 x 만기구간 조합별
+  // 전영업일 유통 물량을 읽어온다 (단위: 조원). 스프레드 추이와 같은 방식: 유형은 항상 막대 하나씩,
+  // 등급/만기는 필터.
+  const volumeFilter = { sectors: new Set(SECTOR_TYPES), grades: new Set(), maturities: new Set() };
+  let volumeCells = [];
+
+  async function fetchVolumeCells() {
+    const url = `${SUPABASE_URL}/rest/v1/volume_cells?select=trade_date,sector,grade,maturity_bucket,volume_jo&order=trade_date.desc`;
     const res = await fetch(url, {
       headers: { apikey: SUPABASE_ANON_KEY, Authorization: `Bearer ${SUPABASE_ANON_KEY}` },
     });
     if (!res.ok) throw new Error(`Supabase 조회 실패: ${res.status}`);
     const rows = await res.json();
     if (rows.length === 0) return [];
-
     const latestDate = rows[0].trade_date;
-    return rows
-      .filter((r) => r.trade_date === latestDate)
-      .map((r) => ({ sector: r.sector, value: Number(r.volume_jo) }));
+    return rows.filter((r) => r.trade_date === latestDate);
+  }
+
+  function buildVolumeDataFromCells(cells, filter) {
+    return Array.from(filter.sectors).sort((a, b) => SECTOR_TYPES.indexOf(a) - SECTOR_TYPES.indexOf(b)).map((sector) => {
+      let sum = 0;
+      for (const c of cells) {
+        if (c.sector !== sector) continue;
+        if (filter.grades.size > 0 && !filter.grades.has(c.grade)) continue;
+        if (filter.maturities.size > 0 && !filter.maturities.has(c.maturity_bucket)) continue;
+        sum += Number(c.volume_jo);
+      }
+      return { sector, value: Math.round(sum * 1000) / 1000 };
+    });
   }
 
   // KOFIA '유통시장 > 실시간 체결정보 > 일자별 거래현황'의 전영업일 회사채 거래를
@@ -615,16 +658,35 @@
     });
   }
 
-  function renderVolumeChart(sectorVolume) {
+  let volumeChart;
+
+  function renderVolumeChart() {
+    const data = buildVolumeDataFromCells(volumeCells, volumeFilter);
     const ctx = document.getElementById('volume-chart');
-    new Chart(ctx, {
+
+    const hasAnyData = data.some((s) => s.value > 0);
+    document.getElementById('volume-empty-msg').style.display = hasAnyData ? 'none' : 'block';
+
+    const labels = data.map((s) => s.sector);
+    const values = data.map((s) => s.value);
+    const colors = data.map((s) => SECTOR_COLORS[s.sector]);
+
+    if (volumeChart) {
+      volumeChart.data.labels = labels;
+      volumeChart.data.datasets[0].data = values;
+      volumeChart.data.datasets[0].backgroundColor = colors;
+      volumeChart.update();
+      return;
+    }
+
+    volumeChart = new Chart(ctx, {
       type: 'bar',
       data: {
-        labels: sectorVolume.map((s) => s.sector),
+        labels,
         datasets: [{
           label: '유통 물량(조원)',
-          data: sectorVolume.map((s) => s.value),
-          backgroundColor: '#2563eb',
+          data: values,
+          backgroundColor: colors,
           borderRadius: 4,
         }],
       },
@@ -639,7 +701,7 @@
     });
   }
 
-  function wireFilterPills(containerId, filterSet) {
+  function wireFilterPills(containerId, filterSet, onChange) {
     document.getElementById(containerId).addEventListener('click', (e) => {
       const btn = e.target.closest('.pill-btn');
       if (!btn) return;
@@ -651,18 +713,20 @@
         filterSet.add(value);
         btn.classList.add('active');
       }
-      renderSpreadChart();
+      onChange();
     });
   }
 
-  wireFilterPills('filter-sector', spreadFilter.sectors);
-  wireFilterPills('filter-maturity', spreadFilter.maturities);
+  wireFilterPills('filter-sector', spreadFilter.sectors, renderSpreadChart);
+  wireFilterPills('filter-maturity', spreadFilter.maturities, renderSpreadChart);
+  wireFilterPills('vol-filter-sector', volumeFilter.sectors, renderVolumeChart);
+  wireFilterPills('vol-filter-maturity', volumeFilter.maturities, renderVolumeChart);
 
-  document.querySelectorAll('#filter-sector .pill-btn').forEach((btn) => {
-    if (spreadFilter.sectors.has(btn.dataset.value)) btn.classList.add('active');
+  document.querySelectorAll('#filter-sector .pill-btn, #vol-filter-sector .pill-btn').forEach((btn) => {
+    btn.classList.add('active');
   });
 
-  function populateGradeFilter(cells) {
+  function populateGradeFilter(containerId, cells, filterSet, onChange) {
     const found = Array.from(new Set(cells.map((c) => c.grade)));
     found.sort((a, b) => {
       const ia = GRADE_ORDER.indexOf(a);
@@ -673,7 +737,7 @@
       return ia - ib;
     });
 
-    const container = document.getElementById('filter-grade');
+    const container = document.getElementById(containerId);
     container.innerHTML = '';
     found.forEach((grade) => {
       const btn = document.createElement('button');
@@ -682,7 +746,7 @@
       btn.textContent = grade;
       container.appendChild(btn);
     });
-    wireFilterPills('filter-grade', spreadFilter.grades);
+    wireFilterPills(containerId, filterSet, onChange);
   }
 
   document.getElementById('rate-cards').innerHTML = '<div style="color:#6b778c;font-size:13px;">국고채 금리를 불러오는 중...</div>';
@@ -720,13 +784,17 @@
   fetchSpreadCells()
     .then((cells) => {
       spreadCells = cells;
-      populateGradeFilter(cells);
+      populateGradeFilter('filter-grade', cells, spreadFilter.grades, renderSpreadChart);
       renderSpreadChart();
     })
     .catch((err) => console.error(err));
 
-  fetchSectorVolume()
-    .then((rows) => renderVolumeChart(rows))
+  fetchVolumeCells()
+    .then((cells) => {
+      volumeCells = cells;
+      populateGradeFilter('vol-filter-grade', cells, volumeFilter.grades, renderVolumeChart);
+      renderVolumeChart();
+    })
     .catch((err) => console.error(err));
 </script>
 

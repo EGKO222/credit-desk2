@@ -151,7 +151,7 @@ async function computeStatsForDay(day) {
     volumeJo: manwon / 1e8,
   }));
 
-  // 유형(공사채/은행채/여전채/회사채) x 등급 x 만기구간 셀별 스프레드
+  // 유형(공사채/은행채/여전채/회사채) x 등급 x 만기구간 셀별 스프레드 + 유통물량
   const cellMap = new Map();
   for (const r of rows) {
     const sector = creditSectorLabel(r.sector);
@@ -161,9 +161,10 @@ async function computeStatsForDay(day) {
     if (!bucket) continue;
 
     const key = `${sector}|${grade}|${bucket}`;
-    const cur = cellMap.get(key) || { sector, grade, bucket, yieldSum: 0, count: 0 };
+    const cur = cellMap.get(key) || { sector, grade, bucket, yieldSum: 0, count: 0, amountManwon: 0 };
     cur.yieldSum += r.avgYield;
     cur.count += 1;
+    cur.amountManwon += r.amountManwon;
     cellMap.set(key, cur);
   }
 
@@ -173,6 +174,7 @@ async function computeStatsForDay(day) {
     bucket: c.bucket,
     spreadBp: (c.yieldSum / c.count - govtYield) * 100,
     tradeCount: c.count,
+    volumeJo: c.amountManwon / 1e8,
   }));
 
   return { volume, cells };
@@ -212,7 +214,8 @@ const days = await getRecentBusinessDays(7);
 console.log("대상 영업일:", days.join(", "));
 
 const volumeRows = [];
-const cellRows = [];
+const spreadCellRows = [];
+const volumeCellRows = [];
 
 for (const day of days) {
   const { volume, cells } = await computeStatsForDay(day);
@@ -222,7 +225,7 @@ for (const day of days) {
     volumeRows.push({ trade_date: isoDate, sector: v.sector, volume_jo: Math.round(v.volumeJo * 1000) / 1000 });
   }
   for (const c of cells) {
-    cellRows.push({
+    spreadCellRows.push({
       trade_date: isoDate,
       sector: c.sector,
       grade: c.grade,
@@ -230,11 +233,20 @@ for (const day of days) {
       spread_bp: Math.round(c.spreadBp * 10) / 10,
       trade_count: c.tradeCount,
     });
+    volumeCellRows.push({
+      trade_date: isoDate,
+      sector: c.sector,
+      grade: c.grade,
+      maturity_bucket: c.bucket,
+      volume_jo: Math.round(c.volumeJo * 1000) / 1000,
+    });
   }
 }
 
 await upsertToSupabase("sector_volume", volumeRows);
-await upsertToSupabase("spread_cells", cellRows);
+await upsertToSupabase("spread_cells", spreadCellRows);
+await upsertToSupabase("volume_cells", volumeCellRows);
 
 console.log(`섹터별 유통물량 저장: ${volumeRows.length}건`);
-console.log(`스프레드 셀 저장: ${cellRows.length}건`);
+console.log(`스프레드 셀 저장: ${spreadCellRows.length}건`);
+console.log(`유통물량 셀 저장: ${volumeCellRows.length}건`);
