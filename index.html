@@ -127,6 +127,39 @@
     color: #ffffff;
   }
 
+  .filter-group {
+    margin-bottom: 10px;
+  }
+
+  .filter-label {
+    font-size: 12px;
+    color: #6b778c;
+    margin-bottom: 6px;
+  }
+
+  .pill-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+
+  .pill-btn {
+    border: 1px solid #dfe1e6;
+    background-color: #ffffff;
+    border-radius: 14px;
+    padding: 4px 12px;
+    font-size: 12px;
+    cursor: pointer;
+    color: #44546f;
+  }
+
+  .pill-btn.active {
+    background-color: #e6f0ff;
+    border-color: #2563eb;
+    color: #0b1f3a;
+    font-weight: 600;
+  }
+
   .chart-wrap {
     position: relative;
     height: 280px;
@@ -222,14 +255,37 @@
     <div class="col">
       <section class="panel">
         <h2>스프레드 추이</h2>
-        <div class="tab-row" id="spread-tabs">
-          <button class="tab-btn active" data-mode="sector">섹터별</button>
-          <button class="tab-btn" data-mode="grade">등급별</button>
-          <button class="tab-btn" data-mode="period">투자기간별</button>
+        <div class="filter-group">
+          <div class="filter-label">유형</div>
+          <div class="pill-row" id="filter-sector">
+            <button class="pill-btn" data-value="공사채">공사채</button>
+            <button class="pill-btn" data-value="은행채">은행채</button>
+            <button class="pill-btn" data-value="여전채">여전채</button>
+            <button class="pill-btn" data-value="회사채">회사채</button>
+          </div>
+        </div>
+        <div class="filter-group">
+          <div class="filter-label">등급</div>
+          <div class="pill-row" id="filter-grade"></div>
+        </div>
+        <div class="filter-group">
+          <div class="filter-label">만기</div>
+          <div class="pill-row" id="filter-maturity">
+            <button class="pill-btn" data-value="3개월">3개월</button>
+            <button class="pill-btn" data-value="6개월">6개월</button>
+            <button class="pill-btn" data-value="1년 이내">1년 이내</button>
+            <button class="pill-btn" data-value="1년~1.5년">1년~1.5년</button>
+            <button class="pill-btn" data-value="1.5년~2년">1.5년~2년</button>
+            <button class="pill-btn" data-value="2년~2.5년">2년~2.5년</button>
+            <button class="pill-btn" data-value="2.5년~3년">2.5년~3년</button>
+            <button class="pill-btn" data-value="3년~5년">3년~5년</button>
+            <button class="pill-btn" data-value="5년 초과">5년 초과</button>
+          </div>
         </div>
         <div class="chart-wrap">
           <canvas id="spread-chart"></canvas>
         </div>
+        <div id="spread-empty-msg" style="display:none;color:#6b778c;font-size:13px;margin-top:8px;">선택한 조건에 해당하는 데이터가 없습니다.</div>
       </section>
 
       <section class="panel">
@@ -301,36 +357,48 @@
     }));
   }
 
-  // KOFIA '일자별 거래현황'(Top5 매매와 동일 소스)에서 계산한 국고채 대비 스프레드(최근 7영업일)를 읽어온다.
-  // 섹터 구분은 KOFIA의 채권종류 분류(국채/지방채/특수채/통안증권/은행채/기타금융채/회사채/ABS)를 그대로 사용한다.
-  const CHART_COLORS = ['#2563eb', '#059669', '#d97706', '#7c3aed', '#dc2626', '#0891b2', '#db2777', '#65a30d'];
+  // KOFIA '일자별 거래현황'(Top5 매매와 동일 소스)에서 계산한, 유형(공사채/은행채/여전채/회사채) x 등급 x 만기구간
+  // 조합별 국고채 대비 스프레드(최근 7영업일)를 읽어온다. 유형은 항상 선택된 것마다 별도의 선으로 그리고,
+  // 등급/만기는 각 유형 선의 데이터를 좁히는 필터로만 쓴다(선이 늘어나지 않음).
+  const SECTOR_TYPES = ['공사채', '은행채', '여전채', '회사채'];
+  const SECTOR_COLORS = { '공사채': '#2563eb', '은행채': '#059669', '여전채': '#d97706', '회사채': '#dc2626' };
+  const GRADE_ORDER = ['AAA', 'AA+', 'AA', 'AA0', 'AA-', 'A+', 'A', 'A0', 'A-', 'BBB+', 'BBB', 'BBB0', 'BBB-', '무등급'];
 
-  async function fetchSpreads() {
-    const url = `${SUPABASE_URL}/rest/v1/spreads?select=trade_date,category_type,category_name,spread_bp&order=trade_date.asc`;
+  let spreadCells = []; // { trade_date, sector, grade, maturity_bucket, spread_bp, trade_count }
+  const spreadFilter = { sectors: new Set(SECTOR_TYPES), grades: new Set(), maturities: new Set() };
+
+  async function fetchSpreadCells() {
+    const url = `${SUPABASE_URL}/rest/v1/spread_cells?select=trade_date,sector,grade,maturity_bucket,spread_bp,trade_count&order=trade_date.asc`;
     const res = await fetch(url, {
       headers: { apikey: SUPABASE_ANON_KEY, Authorization: `Bearer ${SUPABASE_ANON_KEY}` },
     });
     if (!res.ok) throw new Error(`Supabase 조회 실패: ${res.status}`);
-    const rows = await res.json();
+    return res.json();
+  }
 
-    const dates = Array.from(new Set(rows.map((r) => r.trade_date))).sort();
-    const byType = { sector: {}, grade: {}, period: {} };
-    for (const row of rows) {
-      const bucket = byType[row.category_type];
-      if (!bucket) continue;
-      if (!bucket[row.category_name]) bucket[row.category_name] = {};
-      bucket[row.category_name][row.trade_date] = Number(row.spread_bp);
-    }
+  function buildSpreadDatasetsFromCells(cells, filter) {
+    const dates = Array.from(new Set(cells.map((c) => c.trade_date))).sort();
 
-    const datasets = {};
-    for (const type of Object.keys(byType)) {
-      const names = Object.keys(byType[type]).sort();
-      datasets[type] = names.map((name, i) => ({
-        name,
-        color: CHART_COLORS[i % CHART_COLORS.length],
-        data: dates.map((d) => byType[type][name][d] ?? null),
-      }));
-    }
+    const datasets = Array.from(filter.sectors).sort((a, b) => SECTOR_TYPES.indexOf(a) - SECTOR_TYPES.indexOf(b)).map((sector) => {
+      const byDate = new Map();
+      for (const d of dates) byDate.set(d, { sum: 0, weight: 0 });
+
+      for (const c of cells) {
+        if (c.sector !== sector) continue;
+        if (filter.grades.size > 0 && !filter.grades.has(c.grade)) continue;
+        if (filter.maturities.size > 0 && !filter.maturities.has(c.maturity_bucket)) continue;
+        const acc = byDate.get(c.trade_date);
+        acc.sum += Number(c.spread_bp) * c.trade_count;
+        acc.weight += c.trade_count;
+      }
+
+      const data = dates.map((d) => {
+        const acc = byDate.get(d);
+        return acc.weight > 0 ? Math.round((acc.sum / acc.weight) * 10) / 10 : null;
+      });
+
+      return { name: sector, color: SECTOR_COLORS[sector], data };
+    });
 
     return { dates: dates.map((d) => d.slice(5).replace('-', '/')), datasets };
   }
@@ -506,12 +574,13 @@
   }
 
   let spreadChart;
-  let spreadDates = [];
-  let spreadDatasets = { sector: [], grade: [], period: [] };
 
-  function buildSpreadChart(mode) {
+  function renderSpreadChart() {
+    const { dates, datasets: series } = buildSpreadDatasetsFromCells(spreadCells, spreadFilter);
     const ctx = document.getElementById('spread-chart');
-    const series = spreadDatasets[mode];
+
+    const hasAnyData = series.some((s) => s.data.some((v) => v !== null));
+    document.getElementById('spread-empty-msg').style.display = hasAnyData ? 'none' : 'block';
 
     const datasets = series.map((s) => ({
       label: s.name,
@@ -524,7 +593,7 @@
     }));
 
     if (spreadChart) {
-      spreadChart.data.labels = spreadDates;
+      spreadChart.data.labels = dates;
       spreadChart.data.datasets = datasets;
       spreadChart.update();
       return;
@@ -532,7 +601,7 @@
 
     spreadChart = new Chart(ctx, {
       type: 'line',
-      data: { labels: spreadDates, datasets },
+      data: { labels: dates, datasets },
       options: {
         responsive: true,
         maintainAspectRatio: false,
@@ -570,13 +639,51 @@
     });
   }
 
-  document.getElementById('spread-tabs').addEventListener('click', (e) => {
-    const btn = e.target.closest('.tab-btn');
-    if (!btn) return;
-    document.querySelectorAll('#spread-tabs .tab-btn').forEach((b) => b.classList.remove('active'));
-    btn.classList.add('active');
-    buildSpreadChart(btn.dataset.mode);
+  function wireFilterPills(containerId, filterSet) {
+    document.getElementById(containerId).addEventListener('click', (e) => {
+      const btn = e.target.closest('.pill-btn');
+      if (!btn) return;
+      const value = btn.dataset.value;
+      if (filterSet.has(value)) {
+        filterSet.delete(value);
+        btn.classList.remove('active');
+      } else {
+        filterSet.add(value);
+        btn.classList.add('active');
+      }
+      renderSpreadChart();
+    });
+  }
+
+  wireFilterPills('filter-sector', spreadFilter.sectors);
+  wireFilterPills('filter-maturity', spreadFilter.maturities);
+
+  document.querySelectorAll('#filter-sector .pill-btn').forEach((btn) => {
+    if (spreadFilter.sectors.has(btn.dataset.value)) btn.classList.add('active');
   });
+
+  function populateGradeFilter(cells) {
+    const found = Array.from(new Set(cells.map((c) => c.grade)));
+    found.sort((a, b) => {
+      const ia = GRADE_ORDER.indexOf(a);
+      const ib = GRADE_ORDER.indexOf(b);
+      if (ia === -1 && ib === -1) return a.localeCompare(b);
+      if (ia === -1) return 1;
+      if (ib === -1) return -1;
+      return ia - ib;
+    });
+
+    const container = document.getElementById('filter-grade');
+    container.innerHTML = '';
+    found.forEach((grade) => {
+      const btn = document.createElement('button');
+      btn.className = 'pill-btn';
+      btn.dataset.value = grade;
+      btn.textContent = grade;
+      container.appendChild(btn);
+    });
+    wireFilterPills('filter-grade', spreadFilter.grades);
+  }
 
   document.getElementById('rate-cards').innerHTML = '<div style="color:#6b778c;font-size:13px;">국고채 금리를 불러오는 중...</div>';
   fetchFinalQuoteRates()
@@ -610,11 +717,11 @@
       document.getElementById('investment-opinions').innerHTML = '<div style="color:#d64545;font-size:13px;">투자의견을 불러오지 못했습니다.</div>';
     });
 
-  fetchSpreads()
-    .then(({ dates, datasets }) => {
-      spreadDates = dates;
-      spreadDatasets = datasets;
-      buildSpreadChart(document.querySelector('#spread-tabs .tab-btn.active').dataset.mode);
+  fetchSpreadCells()
+    .then((cells) => {
+      spreadCells = cells;
+      populateGradeFilter(cells);
+      renderSpreadChart();
     })
     .catch((err) => console.error(err));
 

@@ -75,6 +75,25 @@ create policy "anyone can read spreads"
   on spreads for select
   using (true);
 
+-- 유형(공사채/은행채/여전채/회사채) x 등급 x 만기구간 조합별 스프레드.
+-- spreads(섹터/등급/기간을 각각 따로 보던 옛 테이블)는 그대로 두되, 스프레드 추이 화면은 이 테이블을 사용한다.
+create table if not exists spread_cells (
+  trade_date date not null,
+  sector text not null,
+  grade text not null,
+  maturity_bucket text not null,
+  spread_bp numeric not null,
+  trade_count integer not null,
+  updated_at timestamptz not null default now(),
+  primary key (trade_date, sector, grade, maturity_bucket)
+);
+
+alter table spread_cells enable row level security;
+
+create policy "anyone can read spread_cells"
+  on spread_cells for select
+  using (true);
+
 create table if not exists investment_opinions (
   research_id bigint primary key,
   title text not null,

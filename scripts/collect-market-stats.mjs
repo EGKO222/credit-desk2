@@ -1,6 +1,6 @@
 // KOFIA '유통시장 > 실시간 체결정보 > 일자별 거래현황'(Top5 매매와 동일한 데이터 소스)에서
-// 1) 섹터별(채권종류별) 전영업일 유통 물량
-// 2) 섹터별 / 등급별 / 잔존기간별 국고채 대비 스프레드(최근 7영업일 추이)
+// 1) 섹터별(채권종류별) 전영업일 유통 물량 (sector_volume, 국채 포함 8개 원분류 그대로)
+// 2) 유형(공사채/은행채/여전채/회사채) x 등급 x 만기구간 조합별 국고채 대비 스프레드 (spread_cells, 최근 7영업일)
 // 를 계산해 Supabase에 저장한다.
 // 실행: node --env-file=.env scripts/collect-market-stats.mjs
 
@@ -101,15 +101,32 @@ async function fetchDayTrades(day) {
   return rows;
 }
 
-// 잔존기간 코드(예: "010422" = 1년 4개월 22일)를 대략적인 연 단위 버킷으로 변환
+// 잔존기간 코드(예: "010422" = 1년 4개월 22일)를 세분화된 만기 구간으로 변환
 function maturityBucket(code) {
-  if (!code || code.length < 2) return null;
+  if (!code || code.length < 4) return null;
   const years = parseInt(code.slice(0, 2), 10);
-  if (Number.isNaN(years)) return null;
-  if (years < 2) return "1년";
-  if (years < 4) return "3년";
-  if (years < 7) return "5년";
-  return "10년";
+  const months = parseInt(code.slice(2, 4), 10);
+  if (Number.isNaN(years) || Number.isNaN(months)) return null;
+  const totalMonths = years * 12 + months;
+
+  if (totalMonths <= 3) return "3개월";
+  if (totalMonths <= 6) return "6개월";
+  if (totalMonths <= 12) return "1년 이내";
+  if (totalMonths <= 18) return "1년~1.5년";
+  if (totalMonths <= 24) return "1.5년~2년";
+  if (totalMonths <= 30) return "2년~2.5년";
+  if (totalMonths <= 36) return "2.5년~3년";
+  if (totalMonths <= 60) return "3년~5년";
+  return "5년 초과";
+}
+
+// KOFIA 원분류 -> 화면에 쓰는 4개 크레딧 유형 표기로 변환 (국채/지방채/통안증권/ABS는 이 필터에서 제외)
+function creditSectorLabel(rawSector) {
+  if (rawSector === "특수채") return "공사채";
+  if (rawSector === "은행채") return "은행채";
+  if (rawSector === "기타금융채") return "여전채";
+  if (rawSector === "회사채") return "회사채";
+  return null;
 }
 
 function average(nums) {
@@ -117,13 +134,13 @@ function average(nums) {
   return nums.reduce((a, b) => a + b, 0) / nums.length;
 }
 
-async function computeSpreadsForDay(day) {
+async function computeStatsForDay(day) {
   const rows = await fetchDayTrades(day);
 
   const govtYield = average(rows.filter((r) => r.sector === "국채").map((r) => r.avgYield));
-  if (govtYield === null) return { volume: [], spreads: [] };
+  if (govtYield === null) return { volume: [], cells: [] };
 
-  // 섹터별 유통 물량 (만원 -> 조원)
+  // 섹터별 유통 물량 (만원 -> 조원, KOFIA 원분류 8개 그대로)
   const volumeBySector = new Map();
   for (const r of rows) {
     const cur = volumeBySector.get(r.sector) || 0;
@@ -134,48 +151,31 @@ async function computeSpreadsForDay(day) {
     volumeJo: manwon / 1e8,
   }));
 
-  // 섹터별 스프레드 (국채 제외)
-  const yieldBySector = new Map();
+  // 유형(공사채/은행채/여전채/회사채) x 등급 x 만기구간 셀별 스프레드
+  const cellMap = new Map();
   for (const r of rows) {
-    if (r.sector === "국채") continue;
-    if (!yieldBySector.has(r.sector)) yieldBySector.set(r.sector, []);
-    yieldBySector.get(r.sector).push(r.avgYield);
-  }
-  const sectorSpreads = Array.from(yieldBySector.entries()).map(([sector, yields]) => ({
-    type: "sector",
-    name: sector,
-    spreadBp: (average(yields) - govtYield) * 100,
-  }));
-
-  // 등급별 스프레드 (신용등급이 있는 채권만)
-  const yieldByGrade = new Map();
-  for (const r of rows) {
-    if (!r.grade) continue;
-    if (!yieldByGrade.has(r.grade)) yieldByGrade.set(r.grade, []);
-    yieldByGrade.get(r.grade).push(r.avgYield);
-  }
-  const gradeSpreads = Array.from(yieldByGrade.entries()).map(([grade, yields]) => ({
-    type: "grade",
-    name: grade,
-    spreadBp: (average(yields) - govtYield) * 100,
-  }));
-
-  // 투자기간별 스프레드 (국채/통안증권 제외한 크레딧 채권)
-  const yieldByPeriod = new Map();
-  for (const r of rows) {
-    if (r.sector === "국채" || r.sector === "통안증권") continue;
+    const sector = creditSectorLabel(r.sector);
+    if (!sector) continue;
+    const grade = r.grade || "무등급";
     const bucket = maturityBucket(r.maturityCode);
     if (!bucket) continue;
-    if (!yieldByPeriod.has(bucket)) yieldByPeriod.set(bucket, []);
-    yieldByPeriod.get(bucket).push(r.avgYield);
+
+    const key = `${sector}|${grade}|${bucket}`;
+    const cur = cellMap.get(key) || { sector, grade, bucket, yieldSum: 0, count: 0 };
+    cur.yieldSum += r.avgYield;
+    cur.count += 1;
+    cellMap.set(key, cur);
   }
-  const periodSpreads = Array.from(yieldByPeriod.entries()).map(([period, yields]) => ({
-    type: "period",
-    name: period,
-    spreadBp: (average(yields) - govtYield) * 100,
+
+  const cells = Array.from(cellMap.values()).map((c) => ({
+    sector: c.sector,
+    grade: c.grade,
+    bucket: c.bucket,
+    spreadBp: (c.yieldSum / c.count - govtYield) * 100,
+    tradeCount: c.count,
   }));
 
-  return { volume, spreads: [...sectorSpreads, ...gradeSpreads, ...periodSpreads] };
+  return { volume, cells };
 }
 
 async function upsertToSupabase(table, rows) {
@@ -212,27 +212,29 @@ const days = await getRecentBusinessDays(7);
 console.log("대상 영업일:", days.join(", "));
 
 const volumeRows = [];
-const spreadRows = [];
+const cellRows = [];
 
 for (const day of days) {
-  const { volume, spreads } = await computeSpreadsForDay(day);
+  const { volume, cells } = await computeStatsForDay(day);
   const isoDate = toIsoDate(day);
 
   for (const v of volume) {
     volumeRows.push({ trade_date: isoDate, sector: v.sector, volume_jo: Math.round(v.volumeJo * 1000) / 1000 });
   }
-  for (const s of spreads) {
-    spreadRows.push({
+  for (const c of cells) {
+    cellRows.push({
       trade_date: isoDate,
-      category_type: s.type,
-      category_name: s.name,
-      spread_bp: Math.round(s.spreadBp * 10) / 10,
+      sector: c.sector,
+      grade: c.grade,
+      maturity_bucket: c.bucket,
+      spread_bp: Math.round(c.spreadBp * 10) / 10,
+      trade_count: c.tradeCount,
     });
   }
 }
 
 await upsertToSupabase("sector_volume", volumeRows);
-await upsertToSupabase("spreads", spreadRows);
+await upsertToSupabase("spread_cells", cellRows);
 
 console.log(`섹터별 유통물량 저장: ${volumeRows.length}건`);
-console.log(`스프레드 저장: ${spreadRows.length}건`);
+console.log(`스프레드 셀 저장: ${cellRows.length}건`);
