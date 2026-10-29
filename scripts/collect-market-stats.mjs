@@ -99,23 +99,22 @@ async function fetchDayTrades(day) {
   return rows;
 }
 
-// 잔존기간 코드(예: "010422" = 1년 4개월 22일)를 세분화된 만기 구간으로 변환
-function maturityBucket(code) {
-  if (!code || code.length < 4) return null;
-  const years = parseInt(code.slice(0, 2), 10);
-  const months = parseInt(code.slice(2, 4), 10);
-  if (Number.isNaN(years) || Number.isNaN(months)) return null;
-  const totalMonths = years * 12 + months;
+// 화면에 쓰는 만기 구간 (이 목록 밖의 잔존기간은 수집하지 않는다)
+const MATURITY_BUCKETS = ["1년 이내", "1~2년", "3~4년", "5~6년", "7~8년", "10~11년"];
 
-  if (totalMonths <= 3) return "3개월";
-  if (totalMonths <= 6) return "6개월";
-  if (totalMonths <= 12) return "1년 이내";
-  if (totalMonths <= 18) return "1년~1.5년";
-  if (totalMonths <= 24) return "1.5년~2년";
-  if (totalMonths <= 30) return "2년~2.5년";
-  if (totalMonths <= 36) return "2.5년~3년";
-  if (totalMonths <= 60) return "3년~5년";
-  return "5년 초과";
+// 잔존기간 코드(예: "010422" = 1년 4개월 22일)를 만기 구간으로 변환
+function maturityBucket(code) {
+  if (!code || code.length < 2) return null;
+  const years = parseInt(code.slice(0, 2), 10);
+  if (Number.isNaN(years)) return null;
+
+  if (years === 0) return "1년 이내";
+  if (years === 1) return "1~2년";
+  if (years === 3) return "3~4년";
+  if (years === 5) return "5~6년";
+  if (years === 7) return "7~8년";
+  if (years === 10) return "10~11년";
+  return null;
 }
 
 // KOFIA 원분류 -> 화면에 쓰는 4개 크레딧 유형 표기로 변환 (국채/지방채/통안증권/ABS는 이 필터에서 제외)
@@ -244,6 +243,19 @@ for (const day of days) {
 await upsertToSupabase("sector_volume", volumeRows);
 await upsertToSupabase("spread_cells", spreadCellRows);
 await upsertToSupabase("volume_cells", volumeCellRows);
+
+// 만기 구간을 바꾸면서 남은 예전 구간(3개월, 3년~5년 등) 행 정리 (사용자 허락 받음)
+const keepList = `(${MATURITY_BUCKETS.map((b) => `"${b}"`).join(",")})`;
+for (const table of ["spread_cells", "volume_cells"]) {
+  const res = await fetch(
+    `${SUPABASE_URL}/rest/v1/${table}?maturity_bucket=not.in.${encodeURIComponent(keepList)}`,
+    {
+      method: "DELETE",
+      headers: { apikey: SUPABASE_SERVICE_ROLE_KEY, Authorization: `Bearer ${SUPABASE_SERVICE_ROLE_KEY}` },
+    }
+  );
+  if (!res.ok) throw new Error(`예전 만기 구간 정리 실패 (${table}): ${res.status} ${await res.text()}`);
+}
 
 console.log(`섹터별 유통물량 저장: ${volumeRows.length}건`);
 console.log(`스프레드 셀 저장: ${spreadCellRows.length}건`);
