@@ -297,17 +297,40 @@
           <div class="filter-label">만기</div>
           <div class="pill-row" id="filter-maturity">
             <button class="pill-btn" data-value="1년 이내">1년 이내</button>
-            <button class="pill-btn" data-value="1~2년">1년</button>
-            <button class="pill-btn" data-value="3~4년">3년</button>
-            <button class="pill-btn" data-value="5~6년">5년</button>
-            <button class="pill-btn" data-value="7~8년">7년</button>
-            <button class="pill-btn" data-value="10~11년">10년</button>
+            <button class="pill-btn" data-value="1~2년">1~2년</button>
+            <button class="pill-btn" data-value="2~3년">2~3년</button>
+            <button class="pill-btn" data-value="3~5년">3~5년</button>
+            <button class="pill-btn" data-value="5~7년">5~7년</button>
+            <button class="pill-btn" data-value="7~10년">7~10년</button>
+            <button class="pill-btn" data-value="10년 이상">10년 이상</button>
           </div>
         </div>
         <div class="chart-wrap">
           <canvas id="spread-chart"></canvas>
         </div>
         <div id="spread-empty-msg" style="display:none;color:#6b778c;font-size:13px;margin-top:8px;">선택한 조건에 해당하는 데이터가 없습니다.</div>
+      </section>
+
+      <section class="panel">
+        <h2>수익률 커브</h2>
+        <div class="filter-group">
+          <div class="filter-label">유형</div>
+          <div class="pill-row" id="curve-filter-sector">
+            <button class="pill-btn" data-value="국고">국고</button>
+            <button class="pill-btn" data-value="공사채">공사채</button>
+            <button class="pill-btn" data-value="은행채">은행채</button>
+            <button class="pill-btn" data-value="여전채">여전채</button>
+            <button class="pill-btn" data-value="회사채">회사채</button>
+          </div>
+        </div>
+        <div class="filter-group">
+          <div class="filter-label">등급</div>
+          <div class="pill-row" id="curve-filter-grade"></div>
+        </div>
+        <div class="chart-wrap">
+          <canvas id="curve-chart"></canvas>
+        </div>
+        <div id="curve-empty-msg" style="display:none;color:#6b778c;font-size:13px;margin-top:8px;">선택한 조건에 해당하는 데이터가 없습니다.</div>
       </section>
 
       <section class="panel">
@@ -329,11 +352,12 @@
           <div class="filter-label">만기</div>
           <div class="pill-row" id="vol-filter-maturity">
             <button class="pill-btn" data-value="1년 이내">1년 이내</button>
-            <button class="pill-btn" data-value="1~2년">1년</button>
-            <button class="pill-btn" data-value="3~4년">3년</button>
-            <button class="pill-btn" data-value="5~6년">5년</button>
-            <button class="pill-btn" data-value="7~8년">7년</button>
-            <button class="pill-btn" data-value="10~11년">10년</button>
+            <button class="pill-btn" data-value="1~2년">1~2년</button>
+            <button class="pill-btn" data-value="2~3년">2~3년</button>
+            <button class="pill-btn" data-value="3~5년">3~5년</button>
+            <button class="pill-btn" data-value="5~7년">5~7년</button>
+            <button class="pill-btn" data-value="7~10년">7~10년</button>
+            <button class="pill-btn" data-value="10년 이상">10년 이상</button>
           </div>
         </div>
         <div class="chart-wrap short">
@@ -457,6 +481,46 @@
     });
 
     return { dates: dates.map((d) => d.slice(5).replace('-', '/')), datasets };
+  }
+
+  // 수익률 커브: 국고 + 유형 x 등급 x 잔존 1년 단위 구간별 평균 수익률(%)을 기준일 하루치만 읽어온다.
+  // 유형마다 선 하나씩, 등급은 필터(국고는 등급 구분이 없어 등급 필터를 적용하지 않음).
+  const CURVE_TYPES = ['국고', ...SECTOR_TYPES];
+  const CURVE_COLORS = { '국고': '#475569', ...SECTOR_COLORS };
+  let curveCells = []; // { sector, grade, maturity_year, avg_years, avg_yield, trade_count }
+  const curveFilter = { sectors: new Set(CURVE_TYPES), grades: new Set() };
+
+  async function fetchCurveCells(date) {
+    const headers = { apikey: SUPABASE_ANON_KEY, Authorization: `Bearer ${SUPABASE_ANON_KEY}` };
+    const latestRes = await fetch(`${SUPABASE_URL}/rest/v1/curve_cells?select=trade_date&trade_date=lte.${date}&order=trade_date.desc&limit=1`, { headers });
+    if (!latestRes.ok) throw new Error(`Supabase 조회 실패: ${latestRes.status}`);
+    const latest = await latestRes.json();
+    if (latest.length === 0) return [];
+
+    const res = await fetch(`${SUPABASE_URL}/rest/v1/curve_cells?select=sector,grade,maturity_year,avg_years,avg_yield,trade_count&trade_date=eq.${latest[0].trade_date}`, { headers });
+    if (!res.ok) throw new Error(`Supabase 조회 실패: ${res.status}`);
+    return res.json();
+  }
+
+  function buildCurveSeries(cells, filter) {
+    return Array.from(filter.sectors).sort((a, b) => CURVE_TYPES.indexOf(a) - CURVE_TYPES.indexOf(b)).map((sector) => {
+      const byBin = new Map();
+      for (const c of cells) {
+        if (c.sector !== sector) continue;
+        if (sector !== '국고' && filter.grades.size > 0 && !filter.grades.has(c.grade)) continue;
+        const acc = byBin.get(c.maturity_year) || { yieldSum: 0, yearsSum: 0, weight: 0 };
+        acc.yieldSum += Number(c.avg_yield) * c.trade_count;
+        acc.yearsSum += Number(c.avg_years) * c.trade_count;
+        acc.weight += c.trade_count;
+        byBin.set(c.maturity_year, acc);
+      }
+
+      const points = Array.from(byBin.values())
+        .map((a) => ({ x: Math.round((a.yearsSum / a.weight) * 100) / 100, y: Math.round((a.yieldSum / a.weight) * 1000) / 1000 }))
+        .sort((a, b) => a.x - b.x);
+
+      return { name: sector, color: CURVE_COLORS[sector], points };
+    });
   }
 
   // KOFIA '일자별 거래현황'에서 집계한, 유형(공사채/은행채/여전채/회사채) x 등급 x 만기구간 조합별
@@ -689,6 +753,53 @@
     });
   }
 
+  let curveChart;
+
+  function renderCurveChart() {
+    const series = buildCurveSeries(curveCells, curveFilter);
+    const ctx = document.getElementById('curve-chart');
+
+    const hasAnyData = series.some((s) => s.points.length > 0);
+    document.getElementById('curve-empty-msg').style.display = hasAnyData ? 'none' : 'block';
+
+    const datasets = series.map((s) => ({
+      label: s.name,
+      data: s.points,
+      borderColor: s.color,
+      backgroundColor: s.color,
+      tension: 0.3,
+      pointRadius: 2,
+    }));
+
+    if (curveChart) {
+      curveChart.data.datasets = datasets;
+      curveChart.update();
+      return;
+    }
+
+    curveChart = new Chart(ctx, {
+      type: 'line',
+      data: { datasets },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        interaction: { mode: 'nearest', intersect: false },
+        plugins: {
+          tooltip: {
+            callbacks: {
+              title: (items) => `잔존 ${items[0].parsed.x.toFixed(1)}년`,
+              label: (item) => `${item.dataset.label}: ${item.parsed.y.toFixed(3)}%`,
+            },
+          },
+        },
+        scales: {
+          x: { type: 'linear', min: 0, max: 20, ticks: { stepSize: 2 }, title: { display: true, text: '잔존만기(년)' } },
+          y: { title: { display: true, text: '%' } },
+        },
+      },
+    });
+  }
+
   let volumeChart;
 
   function renderVolumeChart() {
@@ -751,11 +862,13 @@
   wireFilterPills('filter-sector', spreadFilter.sectors, renderSpreadChart);
   wireFilterPills('filter-maturity', spreadFilter.maturities, renderSpreadChart);
   wireFilterPills('filter-grade', spreadFilter.grades, renderSpreadChart);
+  wireFilterPills('curve-filter-sector', curveFilter.sectors, renderCurveChart);
+  wireFilterPills('curve-filter-grade', curveFilter.grades, renderCurveChart);
   wireFilterPills('vol-filter-sector', volumeFilter.sectors, renderVolumeChart);
   wireFilterPills('vol-filter-maturity', volumeFilter.maturities, renderVolumeChart);
   wireFilterPills('vol-filter-grade', volumeFilter.grades, renderVolumeChart);
 
-  document.querySelectorAll('#filter-sector .pill-btn, #vol-filter-sector .pill-btn').forEach((btn) => {
+  document.querySelectorAll('#filter-sector .pill-btn, #curve-filter-sector .pill-btn, #vol-filter-sector .pill-btn').forEach((btn) => {
     btn.classList.add('active');
   });
 
@@ -822,6 +935,14 @@
         spreadCells = cells;
         populateGradeFilter('filter-grade', cells, spreadFilter.grades);
         renderSpreadChart();
+      })
+      .catch((err) => console.error(err));
+
+    fetchCurveCells(date)
+      .then((cells) => {
+        curveCells = cells;
+        populateGradeFilter('curve-filter-grade', cells.filter((c) => c.sector !== '국고'), curveFilter.grades);
+        renderCurveChart();
       })
       .catch((err) => console.error(err));
 

@@ -115,6 +115,26 @@ create policy "anyone can read volume_cells"
   on volume_cells for select
   using (true);
 
+-- 국고 + 유형(공사채/은행채/여전채/회사채) x 등급 x 잔존 1년 단위 구간별 평균 수익률. 수익률 커브 차트용.
+-- maturity_year = 잔존 정수 연수(0~19), avg_years = 그 구간 거래들의 평균 잔존기간(연), avg_yield = 평균 수익률(%).
+create table if not exists curve_cells (
+  trade_date date not null,
+  sector text not null,
+  grade text not null,
+  maturity_year integer not null,
+  avg_years numeric not null,
+  avg_yield numeric not null,
+  trade_count integer not null,
+  updated_at timestamptz not null default now(),
+  primary key (trade_date, sector, grade, maturity_year)
+);
+
+alter table curve_cells enable row level security;
+
+create policy "anyone can read curve_cells"
+  on curve_cells for select
+  using (true);
+
 create table if not exists investment_opinions (
   research_id bigint primary key,
   title text not null,
