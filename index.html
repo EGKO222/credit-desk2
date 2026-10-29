@@ -480,7 +480,7 @@
     return { dates: dates.map((d) => d.slice(5).replace('-', '/')), datasets };
   }
 
-  // 수익률 커브: KOFIA '시가평가 가중평균수익률' 표(국고 + 유형 x 등급 x 만기)를 저장해 둔 curve_yields에서,
+  // 수익률 커브: KOFIA '채권시가평가수익률' 평가사 평균 표(국고 + 유형 x 등급 x 만기)를 저장해 둔 curve_yields에서,
   // 선택한 기준일 이하의 가장 최근 하루치를 읽어온다. 선 하나 = (유형, 등급) 한 가지로 고정.
   const CURVE_SERIES = [
     { key: '국고', sector: '국고', grade: '무등급', color: '#475569' },
@@ -756,7 +756,7 @@
     document.getElementById('curve-empty-msg').style.display = hasAnyData ? 'none' : 'block';
     const emptyNames = series.filter((s) => s.points.length === 0).map((s) => s.name);
     document.getElementById('curve-date-note').textContent = curveCells.length > 0
-      ? `자료 기준일: ${curveCells[0].trade_date} (KOFIA 시가평가 가중평균수익률, 거래가 없던 만기는 점이 없음)`
+      ? `자료 기준일: ${curveCells[0].trade_date} (KOFIA 채권시가평가수익률, 나이스피앤아이·한국자산평가·KIS자산평가 평균)`
         + (emptyNames.length > 0 ? ` · 이 날 데이터 없음: ${emptyNames.join(', ')}` : '')
       : '';
 

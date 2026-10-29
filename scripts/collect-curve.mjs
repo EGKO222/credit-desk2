@@ -1,6 +1,6 @@
-// KOFIA 채권정보센터의 '채권금리 > 가중평균수익률 > 시가평가 가중평균수익률'(그날 실제 거래된 칸만 값이 있는 표)을
-// 받아 국고 + 유형(공사채/은행채/여전채/회사채) x 등급 x 만기별 수익률을 curve_yields에 저장한다 (수익률 커브용).
-// 최근 7영업일을 매번 다시 받아 덮어쓴다.
+// KOFIA 채권정보센터의 '시가평가 > 채권시가평가수익률 > 일자별'(평가사 평균: 나이스피앤아이·한국자산평가·KIS자산평가의
+// 평균, 민평) 표를 받아 국고 + 유형(공사채/은행채/여전채/회사채) x 등급 x 만기별 수익률을 curve_yields에 저장한다
+// (수익률 커브용). 최근 7영업일을 매번 다시 받아, 그 날짜의 기존 행을 지우고 새로 넣는다.
 // 실행: node --env-file=.env scripts/collect-curve.mjs
 
 const SUPABASE_URL = process.env.SUPABASE_URL;
@@ -67,29 +67,30 @@ async function getRecentBusinessDays(count) {
   return days;
 }
 
-// KOFIA 표의 (대분류, 종류, 신용등급) -> 화면의 (유형, 등급). 여기에 없는 행은 저장하지 않는다.
+// KOFIA 표의 (대분류, 종류, 신용등급) -> 화면의 (유형, 등급). 보증채·사모채 등 여기에 없는 행은 저장하지 않는다.
+// 은행채의 AAA(산금채)/AAA(중금채)는 별도 행이라 제외하고 일반 AAA 행만 쓴다.
 function mapRow(large, type, rank) {
   if (large === "국채" && type === "국고채권") return { sector: "국고", grade: "무등급" };
   if (large === "특수채" && type === "공사채 및 공단채" && /^(AAA|AA\+|AA)$/.test(rank)) return { sector: "공사채", grade: rank };
-  // 은행채: AAA(산금채)/AAA(중금채)/AAA는 모두 AAA 한 줄로 합친다.
-  if (large.startsWith("금융채 I(") && type === "무보증") return { sector: "은행채", grade: rank.startsWith("AAA") ? "AAA" : rank };
+  if (large.startsWith("금융채 I(") && type === "무보증" && !rank.startsWith("AAA(")) return { sector: "은행채", grade: rank };
   if (large.includes("금융채 II(") && type === "무보증") return { sector: "여전채", grade: rank };
   if (large.startsWith("회사채 I(") && type === "무보증") return { sector: "회사채", grade: rank };
   return null;
 }
 
+// reportCompCd A20000 = 평가사 평균, val1~val3 = 평균에 쓸 평가사 (A10002/A10003/A10004 = 나이스피앤아이, 한국자산평가, KIS자산평가)
 async function fetchDay(day) {
   const xml = await callKofia(
-    "BISSrtPrcEstMtrxWhtAvgSrchSO",
-    "selectList",
-    "BISSrtPrcEstMtrxWhtAvgDTO",
-    `<standardDt>${day}</standardDt><applyGbCd>C00</applyGbCd><val20>1</val20>`
+    "BISBndSrtPrcSrchSO",
+    "selectDay",
+    "BISBndSrtPrcDayDTO",
+    `<standardDt>${day}</standardDt><reportCompCd>A20000</reportCompCd><applyGbCd>C00</applyGbCd><val1>A10002</val1><val2>A10003</val2><val3>A10004</val3><val4></val4><val5></val5>`
   );
 
-  const blocks = xml.match(/<BISSrtPrcEstMtrxWhtAvgDTO>[\s\S]*?<\/BISSrtPrcEstMtrxWhtAvgDTO>/g) || [];
+  const blocks = xml.match(/<BISBndSrtPrcDayDTO>[\s\S]*?<\/BISBndSrtPrcDayDTO>/g) || [];
+  const isoDate = toIsoDate(day);
 
-  // 같은 (유형, 등급, 만기)로 모이는 행은 거래가 있는 값만 단순평균한다.
-  const acc = new Map();
+  const out = [];
   for (const block of blocks) {
     const f = {};
     for (const m of block.matchAll(/<(\w+)>([^<]*)<\/\1>/g)) f[m[1]] = m[2].trim();
@@ -99,23 +100,20 @@ async function fetchDay(day) {
 
     TENOR_YEARS.forEach((years, i) => {
       const y = parseFloat(f[`val${i + 1}`]);
-      if (Number.isNaN(y) || y === 0) return; // 0 = 그날 거래 없음
-      const key = `${mapped.sector}|${mapped.grade}|${years}`;
-      const cur = acc.get(key) || { ...mapped, years, sum: 0, n: 0 };
-      cur.sum += y;
-      cur.n += 1;
-      acc.set(key, cur);
+      if (Number.isNaN(y) || y === 0) return; // 빈 칸 = 해당 만기 없음
+      out.push({ trade_date: isoDate, sector: mapped.sector, grade: mapped.grade, tenor_years: years, yield_pct: y });
     });
   }
+  return out;
+}
 
-  const isoDate = toIsoDate(day);
-  return Array.from(acc.values()).map((c) => ({
-    trade_date: isoDate,
-    sector: c.sector,
-    grade: c.grade,
-    tenor_years: c.years,
-    yield_pct: Math.round((c.sum / c.n) * 1000) / 1000,
-  }));
+// 이전 방식(가중평균수익률)으로 쌓인 같은 날짜 행이 남지 않도록, 받은 날짜의 기존 행을 먼저 지운다.
+async function deleteDates(isoDates) {
+  const res = await fetch(`${SUPABASE_URL}/rest/v1/curve_yields?trade_date=in.(${isoDates.join(",")})`, {
+    method: "DELETE",
+    headers: { apikey: SUPABASE_SERVICE_ROLE_KEY, Authorization: `Bearer ${SUPABASE_SERVICE_ROLE_KEY}` },
+  });
+  if (!res.ok) throw new Error(`기존 행 삭제 실패: ${res.status} ${await res.text()}`);
 }
 
 async function upsertToSupabase(rows) {
@@ -149,6 +147,7 @@ if (rows.length === 0) {
   process.exit(1);
 }
 
+await deleteDates(days.map(toIsoDate));
 await upsertToSupabase(rows);
 
 const bySector = {};
