@@ -16,12 +16,10 @@ const TENOR_MAP = {
   "국고채권(30년)": "국고채 30년",
 };
 
+// GitHub Actions 러너는 UTC라서, 한국 날짜(KST) 기준으로 계산한다.
 function todayYyyymmdd() {
-  const now = new Date();
-  const y = now.getFullYear();
-  const m = String(now.getMonth() + 1).padStart(2, "0");
-  const d = String(now.getDate()).padStart(2, "0");
-  return `${y}${m}${d}`;
+  const kst = new Date(Date.now() + 9 * 60 * 60 * 1000);
+  return kst.toISOString().slice(0, 10).replace(/-/g, "");
 }
 
 function toIsoDate(yyyymmdd) {
@@ -29,8 +27,35 @@ function toIsoDate(yyyymmdd) {
   return `${yyyymmdd.slice(0, 4)}-${yyyymmdd.slice(4, 6)}-${yyyymmdd.slice(6, 8)}`;
 }
 
+// 아침(장 시작 전)에는 오늘 자료가 없고 주말/휴일엔 아예 비어 있으므로, 직전 영업일 자료를 조회한다.
+async function getPreviousBusinessDay(fromDate) {
+  const body = `<?xml version="1.0" encoding="utf-8"?>
+<message>
+  <proframeHeader>
+    <pfmAppName>BIS-KOFIABOND</pfmAppName>
+    <pfmSvcName>BISBefBizYMDSrchSO</pfmSvcName>
+    <pfmFnName>searchBefDay</pfmFnName>
+  </proframeHeader>
+  <systemHeader></systemHeader>
+    <BISBefBizYMDDTO>
+    <standardDt>${fromDate}</standardDt>
+</BISBefBizYMDDTO>
+</message>
+`;
+  const res = await fetch("https://www.kofiabond.or.kr/proframeWeb/XMLSERVICES/", {
+    method: "POST",
+    headers: { "Content-Type": "application/xml; charset=UTF-8" },
+    body,
+  });
+  if (!res.ok) throw new Error(`KOFIA 전영업일 조회 실패: ${res.status}`);
+  const xml = await res.text();
+  const m = xml.match(/<standardDt>([\s\S]*?)<\/standardDt>/);
+  if (!m) throw new Error("전영업일 조회 실패");
+  return m[1].trim();
+}
+
 async function fetchKofiaRates() {
-  const trDate = todayYyyymmdd();
+  const trDate = await getPreviousBusinessDay(todayYyyymmdd());
 
   const body = `<?xml version="1.0" encoding="UTF-8"?><root><message><proframeHeader>
 <pfmAppName>BIS-KOFIABOND</pfmAppName>

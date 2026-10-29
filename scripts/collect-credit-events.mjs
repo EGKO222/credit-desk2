@@ -11,21 +11,15 @@ if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY) {
   process.exit(1);
 }
 
+// GitHub Actions 러너는 UTC라서, 한국 날짜(KST) 기준으로 계산한다.
 function todayYyyymmdd() {
-  const now = new Date();
-  const y = now.getFullYear();
-  const m = String(now.getMonth() + 1).padStart(2, "0");
-  const d = String(now.getDate()).padStart(2, "0");
-  return `${y}${m}${d}`;
+  const kst = new Date(Date.now() + 9 * 60 * 60 * 1000);
+  return kst.toISOString().slice(0, 10).replace(/-/g, "");
 }
 
 function daysAgoYyyymmdd(days) {
-  const now = new Date();
-  now.setDate(now.getDate() - days);
-  const y = now.getFullYear();
-  const m = String(now.getMonth() + 1).padStart(2, "0");
-  const d = String(now.getDate()).padStart(2, "0");
-  return `${y}${m}${d}`;
+  const kst = new Date(Date.now() + 9 * 60 * 60 * 1000 - days * 24 * 60 * 60 * 1000);
+  return kst.toISOString().slice(0, 10).replace(/-/g, "");
 }
 
 function toIsoDate(yyyymmdd) {
