@@ -317,15 +317,11 @@
           <div class="filter-label">유형</div>
           <div class="pill-row" id="curve-filter-sector">
             <button class="pill-btn" data-value="국고">국고</button>
-            <button class="pill-btn" data-value="공사채">공사채</button>
-            <button class="pill-btn" data-value="은행채">은행채</button>
-            <button class="pill-btn" data-value="여전채">여전채</button>
-            <button class="pill-btn" data-value="회사채">회사채</button>
+            <button class="pill-btn" data-value="공사채 무보증 AAA">공사채 무보증 AAA</button>
+            <button class="pill-btn" data-value="은행채 AA+">은행채 AA+</button>
+            <button class="pill-btn" data-value="여전채 AA+">여전채 AA+</button>
+            <button class="pill-btn" data-value="회사채 AA-">회사채 AA-</button>
           </div>
-        </div>
-        <div class="filter-group">
-          <div class="filter-label">등급</div>
-          <div class="pill-row" id="curve-filter-grade"></div>
         </div>
         <div class="chart-wrap">
           <canvas id="curve-chart"></canvas>
@@ -485,13 +481,17 @@
   }
 
   // 수익률 커브: KOFIA '시가평가 가중평균수익률' 표(국고 + 유형 x 등급 x 만기)를 저장해 둔 curve_yields에서,
-  // 선택한 기준일 이하의 가장 최근 하루치를 읽어온다. 유형마다 선 하나씩, 등급은 필터
-  // (선택한 등급이 여러 개면 만기별 단순평균, 국고는 등급 구분이 없어 등급 필터를 적용하지 않음).
-  const CURVE_TYPES = ['국고', ...SECTOR_TYPES];
-  const CURVE_COLORS = { '국고': '#475569', ...SECTOR_COLORS };
+  // 선택한 기준일 이하의 가장 최근 하루치를 읽어온다. 선 하나 = (유형, 등급) 한 가지로 고정.
+  const CURVE_SERIES = [
+    { key: '국고', sector: '국고', grade: '무등급', color: '#475569' },
+    { key: '공사채 무보증 AAA', sector: '공사채', grade: 'AAA', color: SECTOR_COLORS['공사채'] },
+    { key: '은행채 AA+', sector: '은행채', grade: 'AA+', color: SECTOR_COLORS['은행채'] },
+    { key: '여전채 AA+', sector: '여전채', grade: 'AA+', color: SECTOR_COLORS['여전채'] },
+    { key: '회사채 AA-', sector: '회사채', grade: 'AA-', color: SECTOR_COLORS['회사채'] },
+  ];
   const CURVE_TENORS = [1, 3, 5, 7, 10, 20]; // 이 만기에만 점을 찍고 선으로 잇는다
   let curveCells = []; // { trade_date, sector, grade, tenor_years, yield_pct }
-  const curveFilter = { sectors: new Set(CURVE_TYPES), grades: new Set() };
+  const curveFilter = { sectors: new Set(CURVE_SERIES.map((s) => s.key)) };
 
   async function fetchCurveCells(date) {
     const headers = { apikey: SUPABASE_ANON_KEY, Authorization: `Bearer ${SUPABASE_ANON_KEY}` };
@@ -506,24 +506,13 @@
   }
 
   function buildCurveSeries(cells, filter) {
-    return Array.from(filter.sectors).sort((a, b) => CURVE_TYPES.indexOf(a) - CURVE_TYPES.indexOf(b)).map((sector) => {
-      const byTenor = new Map();
-      for (const c of cells) {
-        if (c.sector !== sector) continue;
-        if (sector !== '국고' && filter.grades.size > 0 && !filter.grades.has(c.grade)) continue;
-        const years = Number(c.tenor_years);
-        if (!CURVE_TENORS.includes(years)) continue;
-        const acc = byTenor.get(years) || { sum: 0, n: 0 };
-        acc.sum += Number(c.yield_pct);
-        acc.n += 1;
-        byTenor.set(years, acc);
-      }
-
-      const points = Array.from(byTenor.entries())
-        .map(([x, a]) => ({ x, y: Math.round((a.sum / a.n) * 1000) / 1000 }))
+    return CURVE_SERIES.filter((s) => filter.sectors.has(s.key)).map((s) => {
+      const points = cells
+        .filter((c) => c.sector === s.sector && c.grade === s.grade && CURVE_TENORS.includes(Number(c.tenor_years)))
+        .map((c) => ({ x: Number(c.tenor_years), y: Number(c.yield_pct) }))
         .sort((a, b) => a.x - b.x);
 
-      return { name: sector, color: CURVE_COLORS[sector], points };
+      return { name: s.key, color: s.color, points };
     });
   }
 
@@ -765,8 +754,10 @@
 
     const hasAnyData = series.some((s) => s.points.length > 0);
     document.getElementById('curve-empty-msg').style.display = hasAnyData ? 'none' : 'block';
+    const emptyNames = series.filter((s) => s.points.length === 0).map((s) => s.name);
     document.getElementById('curve-date-note').textContent = curveCells.length > 0
-      ? `자료 기준일: ${curveCells[0].trade_date} (KOFIA 시가평가 가중평균수익률, 거래가 없던 만기는 점이 없음, 등급 미선택 시 전체 등급 평균)`
+      ? `자료 기준일: ${curveCells[0].trade_date} (KOFIA 시가평가 가중평균수익률, 거래가 없던 만기는 점이 없음)`
+        + (emptyNames.length > 0 ? ` · 이 날 데이터 없음: ${emptyNames.join(', ')}` : '')
       : '';
 
     const datasets = series.map((s) => ({
@@ -876,7 +867,6 @@
   wireFilterPills('filter-maturity', spreadFilter.maturities, renderSpreadChart);
   wireFilterPills('filter-grade', spreadFilter.grades, renderSpreadChart);
   wireFilterPills('curve-filter-sector', curveFilter.sectors, renderCurveChart);
-  wireFilterPills('curve-filter-grade', curveFilter.grades, renderCurveChart);
   wireFilterPills('vol-filter-sector', volumeFilter.sectors, renderVolumeChart);
   wireFilterPills('vol-filter-maturity', volumeFilter.maturities, renderVolumeChart);
   wireFilterPills('vol-filter-grade', volumeFilter.grades, renderVolumeChart);
@@ -954,7 +944,6 @@
     fetchCurveCells(date)
       .then((cells) => {
         curveCells = cells;
-        populateGradeFilter('curve-filter-grade', cells.filter((c) => c.sector !== '국고'), curveFilter.grades);
         renderCurveChart();
       })
       .catch((err) => console.error(err));
