@@ -317,8 +317,8 @@
           <div class="filter-label">유형</div>
           <div class="pill-row" id="curve-filter-sector">
             <button class="pill-btn" data-value="국고">국고</button>
-            <button class="pill-btn" data-value="공사채 무보증 AAA">공사채 무보증 AAA</button>
-            <button class="pill-btn" data-value="은행채 AA+">은행채 AA+</button>
+            <button class="pill-btn" data-value="공사채 AAA">공사채 AAA</button>
+            <button class="pill-btn" data-value="은행채 AAA">은행채 AAA</button>
             <button class="pill-btn" data-value="여전채 AA+">여전채 AA+</button>
             <button class="pill-btn" data-value="회사채 AA-">회사채 AA-</button>
           </div>
@@ -484,12 +484,12 @@
   // 선택한 기준일 이하의 가장 최근 하루치를 읽어온다. 선 하나 = (유형, 등급) 한 가지로 고정.
   const CURVE_SERIES = [
     { key: '국고', sector: '국고', grade: '무등급', color: '#475569' },
-    { key: '공사채 무보증 AAA', sector: '공사채', grade: 'AAA', color: SECTOR_COLORS['공사채'] },
-    { key: '은행채 AA+', sector: '은행채', grade: 'AA+', color: SECTOR_COLORS['은행채'] },
+    { key: '공사채 AAA', sector: '공사채', grade: 'AAA', color: SECTOR_COLORS['공사채'] },
+    { key: '은행채 AAA', sector: '은행채', grade: 'AAA', color: SECTOR_COLORS['은행채'] },
     { key: '여전채 AA+', sector: '여전채', grade: 'AA+', color: SECTOR_COLORS['여전채'] },
     { key: '회사채 AA-', sector: '회사채', grade: 'AA-', color: SECTOR_COLORS['회사채'] },
   ];
-  const CURVE_TENORS = [1, 3, 5, 7, 10, 20]; // 이 만기에만 점을 찍고 선으로 잇는다
+  const CURVE_TENORS = [1, 3, 5, 7, 10]; // 이 만기에만 점을 찍고 선으로 잇는다
   let curveCells = []; // { trade_date, sector, grade, tenor_years, yield_pct }
   const curveFilter = { sectors: new Set(CURVE_SERIES.map((s) => s.key)) };
 
@@ -794,7 +794,7 @@
           x: {
             type: 'linear',
             min: 0,
-            max: 20,
+            max: 10,
             afterBuildTicks: (axis) => { axis.ticks = [0, ...CURVE_TENORS].map((value) => ({ value })); },
             title: { display: true, text: '만기(년)' },
           },
