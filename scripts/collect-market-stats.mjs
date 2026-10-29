@@ -1,7 +1,6 @@
 // KOFIA '유통시장 > 실시간 체결정보 > 일자별 거래현황'(Top5 매매와 동일한 데이터 소스)에서
 // 1) 섹터별(채권종류별) 전영업일 유통 물량 (sector_volume, 국채 포함 8개 원분류 그대로)
 // 2) 유형(공사채/은행채/여전채/회사채) x 등급 x 만기구간 조합별 국고채 대비 스프레드 (spread_cells, 최근 7영업일)
-// 3) 국고 + 유형 x 등급 x 잔존 1년 단위(0~20년)별 평균 수익률 (curve_cells, 수익률 커브용)
 // 를 계산해 Supabase에 저장한다.
 // 실행: node --env-file=.env scripts/collect-market-stats.mjs
 
@@ -118,16 +117,6 @@ function maturityBucket(code) {
   return "10년 이상";
 }
 
-// 잔존기간 코드를 연 단위 소수(예: "010422" -> 약 1.39년)로 변환
-function maturityYears(code) {
-  if (!code || code.length < 6) return null;
-  const y = parseInt(code.slice(0, 2), 10);
-  const m = parseInt(code.slice(2, 4), 10);
-  const d = parseInt(code.slice(4, 6), 10);
-  if ([y, m, d].some(Number.isNaN)) return null;
-  return y + m / 12 + d / 365;
-}
-
 // KOFIA 원분류 -> 화면에 쓰는 4개 크레딧 유형 표기로 변환 (국채/지방채/통안증권/ABS는 이 필터에서 제외)
 function creditSectorLabel(rawSector) {
   if (rawSector === "특수채") return "공사채";
@@ -146,7 +135,7 @@ async function computeStatsForDay(day) {
   const rows = await fetchDayTrades(day);
 
   const govtYield = average(rows.filter((r) => r.sector === "국채").map((r) => r.avgYield));
-  if (govtYield === null) return { volume: [], cells: [], curve: [] };
+  if (govtYield === null) return { volume: [], cells: [] };
 
   // 섹터별 유통 물량 (만원 -> 조원, KOFIA 원분류 8개 그대로)
   const volumeBySector = new Map();
@@ -185,33 +174,7 @@ async function computeStatsForDay(day) {
     volumeJo: c.amountManwon / 1e8,
   }));
 
-  // 수익률 커브: 국고 + 4개 유형 x 등급 x 잔존 1년 단위(0~20년) 구간별 평균 수익률/평균 잔존기간
-  const curveMap = new Map();
-  for (const r of rows) {
-    const sector = r.sector === "국채" ? "국고" : creditSectorLabel(r.sector);
-    if (!sector) continue;
-    const years = maturityYears(r.maturityCode);
-    if (years === null || years >= 20) continue;
-    const grade = r.grade || "무등급";
-    const bin = Math.floor(years);
-
-    const key = `${sector}|${grade}|${bin}`;
-    const cur = curveMap.get(key) || { sector, grade, bin, yieldSum: 0, yearsSum: 0, count: 0 };
-    cur.yieldSum += r.avgYield;
-    cur.yearsSum += years;
-    cur.count += 1;
-    curveMap.set(key, cur);
-  }
-  const curve = Array.from(curveMap.values()).map((c) => ({
-    sector: c.sector,
-    grade: c.grade,
-    bin: c.bin,
-    avgYears: c.yearsSum / c.count,
-    avgYield: c.yieldSum / c.count,
-    tradeCount: c.count,
-  }));
-
-  return { volume, cells, curve };
+  return { volume, cells };
 }
 
 async function upsertToSupabase(table, rows) {
@@ -250,23 +213,10 @@ console.log("대상 영업일:", days.join(", "));
 const volumeRows = [];
 const spreadCellRows = [];
 const volumeCellRows = [];
-const curveRows = [];
 
 for (const day of days) {
-  const { volume, cells, curve } = await computeStatsForDay(day);
+  const { volume, cells } = await computeStatsForDay(day);
   const isoDate = toIsoDate(day);
-
-  for (const c of curve) {
-    curveRows.push({
-      trade_date: isoDate,
-      sector: c.sector,
-      grade: c.grade,
-      maturity_year: c.bin,
-      avg_years: Math.round(c.avgYears * 1000) / 1000,
-      avg_yield: Math.round(c.avgYield * 1000) / 1000,
-      trade_count: c.tradeCount,
-    });
-  }
 
   for (const v of volume) {
     volumeRows.push({ trade_date: isoDate, sector: v.sector, volume_jo: Math.round(v.volumeJo * 1000) / 1000 });
@@ -307,10 +257,6 @@ for (const table of ["spread_cells", "volume_cells"]) {
   if (!res.ok) throw new Error(`예전 만기 구간 정리 실패 (${table}): ${res.status} ${await res.text()}`);
 }
 
-// curve_cells 테이블은 supabase_setup.sql 실행 후에만 존재한다.
-await upsertToSupabase("curve_cells", curveRows);
-
-console.log(`수익률 커브 저장: ${curveRows.length}건`);
 console.log(`섹터별 유통물량 저장: ${volumeRows.length}건`);
 console.log(`스프레드 셀 저장: ${spreadCellRows.length}건`);
 console.log(`유통물량 셀 저장: ${volumeCellRows.length}건`);

@@ -330,6 +330,7 @@
         <div class="chart-wrap">
           <canvas id="curve-chart"></canvas>
         </div>
+        <div id="curve-date-note" style="color:#6b778c;font-size:12px;margin-top:8px;"></div>
         <div id="curve-empty-msg" style="display:none;color:#6b778c;font-size:13px;margin-top:8px;">선택한 조건에 해당하는 데이터가 없습니다.</div>
       </section>
 
@@ -483,40 +484,42 @@
     return { dates: dates.map((d) => d.slice(5).replace('-', '/')), datasets };
   }
 
-  // 수익률 커브: 국고 + 유형 x 등급 x 잔존 1년 단위 구간별 평균 수익률(%)을 기준일 하루치만 읽어온다.
-  // 유형마다 선 하나씩, 등급은 필터(국고는 등급 구분이 없어 등급 필터를 적용하지 않음).
+  // 수익률 커브: KOFIA '시가평가 가중평균수익률' 표(국고 + 유형 x 등급 x 만기)를 저장해 둔 curve_yields에서,
+  // 선택한 기준일 이하의 가장 최근 하루치를 읽어온다. 유형마다 선 하나씩, 등급은 필터
+  // (선택한 등급이 여러 개면 만기별 단순평균, 국고는 등급 구분이 없어 등급 필터를 적용하지 않음).
   const CURVE_TYPES = ['국고', ...SECTOR_TYPES];
   const CURVE_COLORS = { '국고': '#475569', ...SECTOR_COLORS };
-  let curveCells = []; // { sector, grade, maturity_year, avg_years, avg_yield, trade_count }
-  const curveFilter = { sectors: new Set(CURVE_TYPES), grades: new Set() };
+  let curveCells = []; // { trade_date, sector, grade, tenor_years, yield_pct }
+  const curveFilter = { sectors: new Set(CURVE_TYPES), grades: new Set(['AA-']) };
 
   async function fetchCurveCells(date) {
     const headers = { apikey: SUPABASE_ANON_KEY, Authorization: `Bearer ${SUPABASE_ANON_KEY}` };
-    const latestRes = await fetch(`${SUPABASE_URL}/rest/v1/curve_cells?select=trade_date&trade_date=lte.${date}&order=trade_date.desc&limit=1`, { headers });
+    const latestRes = await fetch(`${SUPABASE_URL}/rest/v1/curve_yields?select=trade_date&trade_date=lte.${date}&order=trade_date.desc&limit=1`, { headers });
     if (!latestRes.ok) throw new Error(`Supabase 조회 실패: ${latestRes.status}`);
     const latest = await latestRes.json();
     if (latest.length === 0) return [];
 
-    const res = await fetch(`${SUPABASE_URL}/rest/v1/curve_cells?select=sector,grade,maturity_year,avg_years,avg_yield,trade_count&trade_date=eq.${latest[0].trade_date}`, { headers });
+    const res = await fetch(`${SUPABASE_URL}/rest/v1/curve_yields?select=trade_date,sector,grade,tenor_years,yield_pct&trade_date=eq.${latest[0].trade_date}&limit=2000`, { headers });
     if (!res.ok) throw new Error(`Supabase 조회 실패: ${res.status}`);
     return res.json();
   }
 
   function buildCurveSeries(cells, filter) {
     return Array.from(filter.sectors).sort((a, b) => CURVE_TYPES.indexOf(a) - CURVE_TYPES.indexOf(b)).map((sector) => {
-      const byBin = new Map();
+      const byTenor = new Map();
       for (const c of cells) {
         if (c.sector !== sector) continue;
         if (sector !== '국고' && filter.grades.size > 0 && !filter.grades.has(c.grade)) continue;
-        const acc = byBin.get(c.maturity_year) || { yieldSum: 0, yearsSum: 0, weight: 0 };
-        acc.yieldSum += Number(c.avg_yield) * c.trade_count;
-        acc.yearsSum += Number(c.avg_years) * c.trade_count;
-        acc.weight += c.trade_count;
-        byBin.set(c.maturity_year, acc);
+        const years = Number(c.tenor_years);
+        if (years > 20) continue;
+        const acc = byTenor.get(years) || { sum: 0, n: 0 };
+        acc.sum += Number(c.yield_pct);
+        acc.n += 1;
+        byTenor.set(years, acc);
       }
 
-      const points = Array.from(byBin.values())
-        .map((a) => ({ x: Math.round((a.yearsSum / a.weight) * 100) / 100, y: Math.round((a.yieldSum / a.weight) * 1000) / 1000 }))
+      const points = Array.from(byTenor.entries())
+        .map(([x, a]) => ({ x, y: Math.round((a.sum / a.n) * 1000) / 1000 }))
         .sort((a, b) => a.x - b.x);
 
       return { name: sector, color: CURVE_COLORS[sector], points };
@@ -761,6 +764,9 @@
 
     const hasAnyData = series.some((s) => s.points.length > 0);
     document.getElementById('curve-empty-msg').style.display = hasAnyData ? 'none' : 'block';
+    document.getElementById('curve-date-note').textContent = curveCells.length > 0
+      ? `자료 기준일: ${curveCells[0].trade_date} (KOFIA 시가평가 가중평균수익률)`
+      : '';
 
     const datasets = series.map((s) => ({
       label: s.name,
@@ -787,7 +793,7 @@
         plugins: {
           tooltip: {
             callbacks: {
-              title: (items) => `잔존 ${items[0].parsed.x.toFixed(1)}년`,
+              title: (items) => `만기 ${items[0].parsed.x}년`,
               label: (item) => `${item.dataset.label}: ${item.parsed.y.toFixed(3)}%`,
             },
           },
