@@ -115,7 +115,7 @@ create policy "anyone can read volume_cells"
   on volume_cells for select
   using (true);
 
--- 수익률 커브 차트용: KOFIA 시가평가 가중평균수익률 표(국고 + 유형 x 등급 x 만기)를 그대로 저장.
+-- 수익률 커브 차트용: KOFIA 시가평가 가중평균수익률 표(국고 + 유형 x 등급 x 만기)를 저장 (scripts/collect-curve.mjs).
 -- tenor_years = 만기(연, 3개월=0.25), yield_pct = 수익률(%).
 -- (이전에 거래 기반으로 만들려던 curve_cells 테이블은 쓰지 않는다. 이미 만들었다면 비워 두거나 지워도 된다.)
 create table if not exists curve_yields (

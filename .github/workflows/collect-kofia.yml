@@ -46,3 +46,10 @@ jobs:
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
         run: node scripts/collect-investment-opinions.mjs
+
+      # 마지막에 두어, 이 단계가 실패해도 앞 단계들이 건너뛰어지지 않게 한다.
+      - name: Run yield curve collector
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: node scripts/collect-curve.mjs

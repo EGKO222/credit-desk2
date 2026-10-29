@@ -489,8 +489,9 @@
   // (선택한 등급이 여러 개면 만기별 단순평균, 국고는 등급 구분이 없어 등급 필터를 적용하지 않음).
   const CURVE_TYPES = ['국고', ...SECTOR_TYPES];
   const CURVE_COLORS = { '국고': '#475569', ...SECTOR_COLORS };
+  const CURVE_TENORS = [1, 3, 5, 7, 10, 20]; // 이 만기에만 점을 찍고 선으로 잇는다
   let curveCells = []; // { trade_date, sector, grade, tenor_years, yield_pct }
-  const curveFilter = { sectors: new Set(CURVE_TYPES), grades: new Set(['AA-']) };
+  const curveFilter = { sectors: new Set(CURVE_TYPES), grades: new Set() };
 
   async function fetchCurveCells(date) {
     const headers = { apikey: SUPABASE_ANON_KEY, Authorization: `Bearer ${SUPABASE_ANON_KEY}` };
@@ -511,7 +512,7 @@
         if (c.sector !== sector) continue;
         if (sector !== '국고' && filter.grades.size > 0 && !filter.grades.has(c.grade)) continue;
         const years = Number(c.tenor_years);
-        if (years > 20) continue;
+        if (!CURVE_TENORS.includes(years)) continue;
         const acc = byTenor.get(years) || { sum: 0, n: 0 };
         acc.sum += Number(c.yield_pct);
         acc.n += 1;
@@ -765,7 +766,7 @@
     const hasAnyData = series.some((s) => s.points.length > 0);
     document.getElementById('curve-empty-msg').style.display = hasAnyData ? 'none' : 'block';
     document.getElementById('curve-date-note').textContent = curveCells.length > 0
-      ? `자료 기준일: ${curveCells[0].trade_date} (KOFIA 시가평가 가중평균수익률)`
+      ? `자료 기준일: ${curveCells[0].trade_date} (KOFIA 시가평가 가중평균수익률, 거래가 없던 만기는 점이 없음, 등급 미선택 시 전체 등급 평균)`
       : '';
 
     const datasets = series.map((s) => ({
@@ -799,7 +800,13 @@
           },
         },
         scales: {
-          x: { type: 'linear', min: 0, max: 20, ticks: { stepSize: 2 }, title: { display: true, text: '잔존만기(년)' } },
+          x: {
+            type: 'linear',
+            min: 0,
+            max: 20,
+            afterBuildTicks: (axis) => { axis.ticks = [0, ...CURVE_TENORS].map((value) => ({ value })); },
+            title: { display: true, text: '만기(년)' },
+          },
           y: { title: { display: true, text: '%' } },
         },
       },
