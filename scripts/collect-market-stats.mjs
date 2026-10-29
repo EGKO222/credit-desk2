@@ -99,8 +99,10 @@ async function fetchDayTrades(day) {
   return rows;
 }
 
-// 화면에 쓰는 만기 구간 (이 목록 밖의 잔존기간은 수집하지 않는다)
-const MATURITY_BUCKETS = ["1년 이내", "1~2년", "3~4년", "5~6년", "7~8년", "10~11년"];
+// 저장하는 만기 구간. 화면 버튼은 1년 이내/1/3/5/7/10년만 보여주고, 나머지(2~3년 등)는 DB에만 쌓는다.
+const MATURITY_BUCKETS = [
+  "1년 이내", "1~2년", "2~3년", "3~4년", "4~5년", "5~6년", "6~7년", "7~8년", "8~10년", "10~11년", "11년 이상",
+];
 
 // 잔존기간 코드(예: "010422" = 1년 4개월 22일)를 만기 구간으로 변환
 function maturityBucket(code) {
@@ -109,12 +111,9 @@ function maturityBucket(code) {
   if (Number.isNaN(years)) return null;
 
   if (years === 0) return "1년 이내";
-  if (years === 1) return "1~2년";
-  if (years === 3) return "3~4년";
-  if (years === 5) return "5~6년";
-  if (years === 7) return "7~8년";
-  if (years === 10) return "10~11년";
-  return null;
+  if (years >= 11) return "11년 이상";
+  if (years >= 8 && years < 10) return "8~10년";
+  return `${years}~${years + 1}년`;
 }
 
 // KOFIA 원분류 -> 화면에 쓰는 4개 크레딧 유형 표기로 변환 (국채/지방채/통안증권/ABS는 이 필터에서 제외)
